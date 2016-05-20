@@ -1,14 +1,14 @@
 # amoeba
 an UCI chess engine in D language
 
-# How to use it
+## How to use it
 Amoeba is a bare chess engine designed to communicate with a chess GUI (like xboard/winboard, arena, ...) via the UCI protocol.
 For example, xboard -fcp <amoeba> -fd <installation directory> -fUCI
 with:
   <amoeba> the name of the executable
   <installation directory> the directory where is the executable
 
-# About the program
+## About the program
 When I wrote this chess engine, I tried to stay as close as possible to the published algorithms. I hope my code
 to be easy to read & understand.
 
