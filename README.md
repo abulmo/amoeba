@@ -30,7 +30,7 @@ to be easy to read & understand.
   - iterative deepening;
   - static exchange evaluation (see) - iterative version;
 
-  - algorithms used in evaluation
+- algorithms used in evaluation
   - tuned weights with the "Nelder-Mead simplex method", aka amoeba (so the name of the program); 
   - lazy evaluation using material + positional + tempo data; 
   - full evaluation using various mobility scores & pawn structures in addition to the lazy evaluation; 
@@ -41,6 +41,7 @@ to be easy to read & understand.
   - position with an upper bound (score <= α) stored in the transposition table; 
   - enhanced transposition cutoff (ETC); 
   - probcut
+  - etc.
 
 
 
