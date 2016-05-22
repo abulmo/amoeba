@@ -17,18 +17,14 @@ version (GNU) import gcc.builtins;
  */
 /* Swap the bytes of a bitboard (vertical mirror of a Chess board) */
 version (DMD) alias swapBytes = bswap;
+else version (LDC) alias swapBytes = llvm_bswap;
+else version(GNU) alias swapBytes = __builtin_bswap64;
 else {
-	ulong swapBytes(ulong b) pure {
-		version(LDC) {
-			return llvm_bswap(b);
-		} else version(GNU) {
-			return __builtin_bswap64(b);
-		} else {
-			b = ((b >>  8) & 0x00FF00FF00FF00FF) | ((b <<  8) & 0xFF00FF00FF00FF00);
-			b = ((b >> 16) & 0x0000FFFF0000FFFF) | ((b << 16) & 0xFFFF0000FFFF0000);
-			b = ((b >> 32) & 0x00000000FFFFFFFF) | ((b << 32) & 0xFFFFFFFF00000000);
-			return b;
-		}
+	ulong swapBytes(in ulong b) pure {
+		b = ((b >>  8) & 0x00FF00FF00FF00FF) | ((b <<  8) & 0xFF00FF00FF00FF00);
+		b = ((b >> 16) & 0x0000FFFF0000FFFF) | ((b << 16) & 0xFFFF0000FFFF0000);
+		b = ((b >> 32) & 0x00000000FFFFFFFF) | ((b << 32) & 0xFFFFFFFF00000000);
+		return b;
 	}
 }
 
@@ -49,8 +45,21 @@ int popBit(ref ulong b) pure {
 }
 
 /* Count the number of bits */
-version (GNU) alias countBits = __builtin_popcountll;
-else alias countBits = _popcnt;
+version (withPopCount) {
+	version (GNU) alias countBits = __builtin_popcountll;
+	else version (LDC) int countBits(in ulong b) pure {return cast (int) llvm_ctpop(b);}
+	else alias countBits = _popcnt;
+} else {
+	int countBits(in ulong b) pure {
+		ulong c = b
+			- ((b >> 1) & 0x7777777777777777)
+			- ((b >> 2) & 0x3333333333333333)
+			- ((b >> 3) & 0x1111111111111111);
+		c = ((c + (c >> 4)) & 0x0F0F0F0F0F0F0F0FU) * 0x0101010101010101;
+
+		return  cast (int) (c >> 56);
+	}
+}
 
 /* Print bits */
 void writeBitboard(in ulong b, File f = stdout) {
@@ -100,7 +109,7 @@ struct Chrono {
 	}
 }
 
-/* string */
+/* remove characters between two strings */
 string findBetween(in string s, in string start, in string end) pure {
 	size_t i, j;
 
@@ -111,6 +120,7 @@ string findBetween(in string s, in string start, in string end) pure {
 	return s[i .. j];
 }
 
+/* remove characters between two strings. TODO: ("(((blabla)))", "(", ")") remove all */
 string removeBetween(in string s, in string start, in string end) pure {
 	size_t i, j;
 
@@ -194,6 +204,11 @@ class Event {
 			push(line);
 		} while (stdin.isOpen && line != "quit");
 	}
+}
+
+/* an ugly batracian */
+double toad(in real v) pure {
+	return cast (double) v;
 }
 
 /* Unit test */
