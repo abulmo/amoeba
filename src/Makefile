@@ -27,11 +27,11 @@ endif
 #lcd2
 ifeq ($(DC),ldc2)
 	ifeq ($(BUILD),popcount)
-		DFLAGS = -O5 -release -boundscheck=off -w -dw -d-version=withPopCount -mattr=+sse4.2,popcnt
+		DFLAGS = -O3 -release -boundscheck=off -w -dw -singleobj -d-version=withPopCount -mcpu=haswell
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -O5 -release -boundscheck=off -w -dw
+		DFLAGS = -O3 -release -boundscheck=off -w -dw -singleobj -mcpu=haswell
 	else
-		DFLAGS = -O0 -g -gc
+		DFLAGS = -O0 -g -gc -singleobj
 	endif
 
 	PGO_GEN = -fprofile-instr-generate
