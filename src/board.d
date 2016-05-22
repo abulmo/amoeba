@@ -1607,7 +1607,7 @@ void perft(string[] arg, Board init) {
 
 	t.start();
 	total = board.perft(depth, div);
-	writefln("perft %2d : %15d leaves in %10.3f s %12.0f leaves/s", depth, total, t.time(), total / t.time());
+	writefln("perft %2d : %15d leaves in %10.3f s %12.0f leaves/s", depth, total, toad(t.time()), toad(total / t.time()));
 }
 
 /* Test the correctness of the move generator */

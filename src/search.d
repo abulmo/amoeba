@@ -102,9 +102,9 @@ final struct Entry {
  * Transposition table
  */
 final class TranspositionTable {
-	static immutable bucketSize = 4;
+	static immutable size_t bucketSize = 4;
 	Entry [] entry;
-	ulong mask;
+	size_t mask;
 	ubyte date;
 
 	/* constructor */
@@ -134,7 +134,7 @@ final class TranspositionTable {
 
 	/* look for an entry matching the zobrist key */
 	bool probe(in Key k, out Entry found) pure {
-		immutable i = k.code & mask;
+		immutable size_t i = cast (size_t) (k.code & mask);
 		foreach (ref h; entry[i .. i + bucketSize]) {
 			if (h.code == k.code) {
 				h.refresh(date);
@@ -147,7 +147,7 @@ final class TranspositionTable {
 
 	/* store search data */
 	void store(in Key k, in int depth, in int ply, in int α, in int β, in int v, in Move m) pure {
-		immutable i = k.code & mask;
+		immutable size_t i = cast (size_t) (k.code & mask);
 		Entry *w = &entry[i];
 		foreach (ref h; entry[i .. i + bucketSize]) {
 			if (h.code == k.code) {

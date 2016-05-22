@@ -20,7 +20,7 @@ version (DMD) alias swapBytes = bswap;
 else version (LDC) alias swapBytes = llvm_bswap;
 else version(GNU) alias swapBytes = __builtin_bswap64;
 else {
-	ulong swapBytes(in ulong b) pure {
+	ulong swapBytes(ulong b) pure {
 		b = ((b >>  8) & 0x00FF00FF00FF00FF) | ((b <<  8) & 0xFF00FF00FF00FF00);
 		b = ((b >> 16) & 0x0000FFFF0000FFFF) | ((b << 16) & 0xFFFF0000FFFF0000);
 		b = ((b >> 32) & 0x00000000FFFFFFFF) | ((b << 32) & 0xFFFFFFFF00000000);
