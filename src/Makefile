@@ -15,7 +15,7 @@ ifeq ($(DC),gdc)
 	ifeq ($(BUILD),popcount)
 		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check-o $(EXE) -mtune=haswell
+		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
 	else
 		DFLAGS = -O0 -g -fdebug -o $(EXE)
 	endif
