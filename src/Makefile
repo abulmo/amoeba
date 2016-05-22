@@ -27,9 +27,9 @@ endif
 #lcd2
 ifeq ($(DC),ldc2)
 	ifeq ($(BUILD),popcount)
-		DFLAGS = -O5 -release -boundscheck=off -w -dw -d-version=withPopCount -mattr=+sse4.2,popcnt
+		DFLAGS = -O5 -release -boundscheck=off -singleobj -w -dw -d-version=withPopCount -mattr=+sse4.2,popcnt
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -O5 -release -boundscheck=off -w -dw
+		DFLAGS = -O5 -release -boundscheck=off -singleobj -w -dw
 	else
 		DFLAGS = -O0 -g -gc
 	endif
