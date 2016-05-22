@@ -296,7 +296,7 @@ final class Search {
 		if (info.score > Score.high) f.write("mate ", (Score.mate + 1 - info.score) / 2);
 		else if (info.score < -Score.high) f.write("mate ", -(Score.mate + info.score) / 2);
 		else f.write("cp ", info.score);
-		f.writefln(" nps %.0f time %.0f nodes %s pv %s", info.nNodes / info.time, 1000 * info.time, info.nNodes, info.pv);
+		f.writefln(" nps %.0f time %.0f nodes %s pv %s", toad(info.nNodes / info.time), toad(1000 * info.time), info.nNodes, info.pv);
 		f.flush();
 	}
 
@@ -692,7 +692,7 @@ void epdTest(string [] args, in bool checkSolution = true) {
 	Search s = new Search(ttSize * 1024 * 1024);
 	s.option.verbose = verbose;
 	Board b = new Board;
-	writefln("*** epdTest  depth: %d, time: %.3fs, memory: %d MB ***", d, t, ttSize);
+	writefln("*** epdTest  depth: %d, time: %.3fs, memory: %d MB ***", d, toad(t), ttSize);
 
 	auto f = std.stdio.File(epdFile);
 
@@ -715,7 +715,7 @@ void epdTest(string [] args, in bool checkSolution = true) {
 
 	if (checkSolution) writef("epd: %d founds / %d problems ", nGoods, n);
 	else writef("bench: %d positions ", n);
-	writefln(" %d nodes in %.3fs : %.0f nps, depth = %.2f", N, T, N / T, D / n);
+	writefln(" %d nodes in %.3fs : %.0f nps, depth = %.2f", N, toad(T), toad(N / T), toad(D / n));
 	stdout.flush();
 }
 

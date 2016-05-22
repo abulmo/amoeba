@@ -38,7 +38,7 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba 1.0";
+		name = "Amoeba 1.1";
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
@@ -51,7 +51,7 @@ class Uci {
 	void send(T...) (T args) {
 		writeln(args);
 		if (log.isOpen) {
-			log.writef("[%8.3f] %s> ", chrono.time(), name);
+			log.writef("[%8.3f] %s> ", toad(chrono.time()), name);
 			log.writeln(args);
 		}
 		stdout.flush();
@@ -94,11 +94,12 @@ class Uci {
 
 	/* setoption command */
 	void setoption(string line) {
-		string name = findBetween(line, "name", "value").chomp().toLower();
-		skipOver(line, "value");
-		string value = line.chomp().toLower();
+		string name = findBetween(line.chomp(), "name", "value").strip().toLower();
+		findSkip(line, "value");
+		string value = line.strip().toLower();
+		writeln(line, "->'", name, "' + '", value, "'");
 		if (name == "ponder") canPonder = to!bool(value);
-		else if (name == "hash") search.resize(to!size_t(value));
+		else if (name == "hash") search.resize(to!size_t(value) * 1024 * 1024);
 		else if (name == "log") {
 			if (to!bool(value)) {
 				log.open(name ~ to!string(thisProcessID) ~ ".log", "w");
@@ -171,7 +172,7 @@ class Uci {
 		spawn(&eventLoop, event);
 		while (true) {
 			auto line = event.wait();
-			if (log.isOpen) log.writefln("[%8.3f] uci> %s", chrono.time(), line);
+			if (log.isOpen) log.writefln("[%8.3f] uci> %s", toad(chrono.time()), line);
 			if (line == null) break;
 			else if (line == "" || line[0] == '#') continue;
 			else if (findSkip(line, "uci")) uci();

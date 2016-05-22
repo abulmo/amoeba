@@ -13,9 +13,9 @@ endif
 #gdc
 ifeq ($(DC),gdc)
 	ifeq ($(BUILD),popcount)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -msse4.2 -mtune=haswell
+		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
+		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check-o $(EXE) -mtune=haswell
 	else
 		DFLAGS = -O0 -g -fdebug -o $(EXE)
 	endif
@@ -26,24 +26,26 @@ endif
 
 #lcd2
 ifeq ($(DC),ldc2)
-	ifeq ($(BUILD),fast)
-		DFLAGS = -O5 -release -inline -boundscheck=off -w
+	ifeq ($(BUILD),popcount)
+		DFLAGS = -O5 -release -boundscheck=off -w -dw -d-version=withPopCount -mattr=+sse4.2,popcnt
+	else ifeq ($(BUILD),fast)
+		DFLAGS = -O5 -release -boundscheck=off -w -dw
 	else
 		DFLAGS = -O0 -g -gc
 	endif
 
 	PGO_GEN = -fprofile-instr-generate
 	PGO_USE = -fprofile-instr-use=amoeba.profdata
-	PGO_MERGE = llvm-profdata merge -output=amoeba.profdata ../amoeba-*.profraw
+	PGO_MERGE = ldc-profdata merge -output=amoeba.profdata ../amoeba-*.profraw
 
 endif
 
 #dmd
 ifeq ($(DC),dmd)
-	ifeq ($(BUILD),fast)
+	ifeq ($(BUILD),popcount)
+		DFLAGS = -O -release -inline -boundscheck=off -w -version=withPopCount
+	else ifeq ($(BUILD),fast)
 		DFLAGS = -O -release -inline -boundscheck=off -w 
-	else ifeq ($(BUILD),detail)
-		DFLAGS = -O -release -inline -boundscheck=off -w --version=Details
 	else
 		DFLAGS = -g -gc -debug
 	endif
@@ -61,10 +63,10 @@ ifeq ($(EXE),amoeba)
 	SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
 endif
 
-build :
+build : $(SRC)
 	$(DC) $(DFLAGS) $(SRC)
 
-build-pgo :
+build-pgo : $(SRC)
 	$(MAKE) clean
 	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
 	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft --depth=6 | grep perft; 
