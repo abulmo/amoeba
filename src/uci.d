@@ -97,7 +97,6 @@ class Uci {
 		string name = findBetween(line.chomp(), "name", "value").strip().toLower();
 		findSkip(line, "value");
 		string value = line.strip().toLower();
-		writeln(line, "->'", name, "' + '", value, "'");
 		if (name == "ponder") canPonder = to!bool(value);
 		else if (name == "hash") search.resize(to!size_t(value) * 1024 * 1024);
 		else if (name == "log") {
