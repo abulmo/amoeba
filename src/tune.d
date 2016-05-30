@@ -10,7 +10,7 @@ import std.math, std.stdio, std.getopt;
  * Vector  (as in Mathematics) 
  */
 struct Vector {
-	real [] data;
+	double [] data;
 
 	/* construct a vector of size n */
 	this (in size_t n) {
@@ -18,7 +18,7 @@ struct Vector {
 	}
 
 	/* length property */
-	size_t length() pure @property const {
+	size_t length() @property const {
 		return data.length;
 	}
 
@@ -40,19 +40,19 @@ struct Vector {
 	}
 
 	/* operator overloading: V + s; V * s; etc. apply the operator to each member data */
-	Vector opBinary(string op)(in real scalar) const {
+	Vector opBinary(string op)(in double scalar) const {
 		Vector R = Vector(length);
 		foreach (i; 0 .. length) mixin("R[i] = data[i] "~op~" scalar;");
 		return R;
 	}
 
 	/* operator overloading: V + s; V * s; etc. apply the operator to each member data */
-	Vector opBinaryRight(string op)(in real scalar) const {
+	Vector opBinaryRight(string op)(in double scalar) const {
 		return opBinary!op(scalar);
 	}
 
 	/* assignment overloading: set all data member to a value */
-	void opAssign(in real scalar) {
+	void opAssign(in double scalar) {
 		foreach (ref x; data) x = scalar;
 	}
 
@@ -63,7 +63,7 @@ struct Vector {
 	}
 
 	/* assignment operator overloading: apply the operator to each member data */
-	void opOpAssign(string op)(in real scalar) {
+	void opOpAssign(string op)(in double scalar) {
 		foreach (i; 0 .. length) mixin("data[i] "~op~"= scalar;");
 	}
 
@@ -74,12 +74,12 @@ struct Vector {
 	}
 
 	/* indexed access */
-	real opIndex(in size_t i) const {
+	double opIndex(in size_t i) const {
 		assert(i < length);
 		return data[i];
 	}
 	/* indexed access */
-	ref real opIndex(in size_t i) {
+	ref double opIndex(in size_t i) {
 		assert(i < length);
 		return data[i];
 	}
@@ -90,19 +90,19 @@ struct Vector {
 	} 
 	
 	/* compute the norm of the vector */
-	real norm() const {
-		real n = 0;
+	double norm() const {
+		double n = 0;
 		foreach (x; data) n += x * x; 
 		return sqrt(n);
 	}
 
 	/* compute a normalized diff between two vectors */
-	real diff(in Vector v) const {
+	double diff(in Vector v) const {
 		return (this - v).norm;
 	}
 
 	/* set a vector from evaluation weights */
-	void set(in real [] weight, in bool [] isTunable) {		
+	void set(in double [] weight, in bool [] isTunable) {		
 		int j;
 		foreach (i; 0..weight.length) {
 			if (isTunable[i]) data[j++] = 0.01 * weight[i];
@@ -110,7 +110,7 @@ struct Vector {
 	}
 		
 	/* get evaluation weights from a vector */
-	void get(ref real [] weight, in bool [] isTunable) const {
+	void get(ref double [] weight, in bool [] isTunable) const {
 		int j;
 		foreach (i; 0..weight.length) {
 			if (isTunable[i]) weight[i] = 100.0 * data[j++];
@@ -125,12 +125,12 @@ struct Vector {
  */
 class Amoeba {
 	Vector [] P;
-	real [] y;
+	double [] y;
 	bool [] isTunable;
-	real [] weights;
+	double [] weights;
 	Game [] games;
 	size_t best, secondWorst, worst;
-	real K = 1.0;
+	double K = 1.0;
 	Search search;
 	immutable depth = 0;
 	ulong nBoard;
@@ -148,7 +148,7 @@ class Amoeba {
 		writeln("read ", games.length, " games"); stdout.flush();
 	}
 	/* constructor */
-	this (ref const real [] w, in string gameFile) {
+	this (ref const double [] w, in string gameFile) {
 		isTunable.length = w.length;
 		setTunable(1, isTunable.length);
 		weights = w.dup;
@@ -158,7 +158,7 @@ class Amoeba {
 	}
 
 	/* count the number of Tunable weights */
-	size_t countTunable() {
+	size_t countTunable() const {
 		size_t n;
 		foreach(b; isTunable) n += b;
 		return n;
@@ -175,12 +175,12 @@ class Amoeba {
 	}
 
 	/* compute the sigmoid */
-	real sigmoid(const real score) const {
+	double sigmoid(const double score) const {
 		return 1.0 / (1.0 + 10.0 ^^ (-0.0025 * K * score));
 	}
 
 	/* translate a game result into [-1, 0, 1] for the player to move */
-	static real result(in Color c, in Game game) {
+	static double result(in Color c, in Game game) {
 		if (c == Color.white && game.result == Result.whiteWin) return 1;
 		else if (c == Color.black && game.result == Result.blackWin) return 1;
 		else if (game.result == Result.draw) return 0.5;
@@ -189,14 +189,14 @@ class Amoeba {
 
 	/* compute the error from a vector */
 	// TODO: make the computation parallel (via Taskpool?)
-	real getError(in Vector v)  {
-		real error, n, r, s;
+	double getError(in Vector v) {
+		double error, r, s;
 
 		++iter;
 		v.get(weights, isTunable);
 		search.eval = new Eval(weights);
 
-		error = n = 0.0;
+		error = 0.0; nBoard = 0;
 		foreach (g; games) {
 			if (g.moves.length <= 20) continue;
 			search.board.set();
@@ -207,12 +207,12 @@ class Amoeba {
 				s = sigmoid(search.info.score);
 				r = result(search.board.player, g);
 				error += (r - s) ^^ 2;
-				n += 1.0;
+				++nBoard;
 				search.board.update(m);
 			}
 		}
-		nBoard = cast (ulong) n;
-		return error / n;
+
+		return error /  (cast (double) nBoard);
 	}
 
 	/* set the best, worst & second worst vector indexes */
@@ -236,11 +236,48 @@ class Amoeba {
 		}
 	}
 
+	/* Write weights */
+	static void printWeights(const ref double [] weight, std.stdio.File f = stdout) {
+		f.writeln("/*");
+		f.writeln(" * File weight.d");
+		f.writeln(" * Evaluation weight - automatically generated");
+		f.writeln(" * © 2016 Richard Delorme");
+		f.writeln(" */");
+		f.writeln("");
+		f.writeln("double [] initialWeights = [");
+		f.writeln("\t// Opening");
+		f.write("\t"); foreach(i;  0 ..   7) f.writef("%+7.4f, ", weight[i]); f.writeln(" // material    [ 0- 6]");
+		f.write("\t"); foreach(i;  7 ..  13) f.writef("%+7.4f, ", weight[i]); f.writeln("          // mobility    [ 7-12]");
+		f.write("\t"); foreach(i; 13 ..  19) f.writef("%+7.4f, ", weight[i]); f.writeln("          // attack      [13-18]");
+		f.write("\t"); foreach(i; 19 ..  25) f.writef("%+7.4f, ", weight[i]); f.writeln("          // defense     [19-24]");
+		f.write("\t"); foreach(i; 25 ..  30) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack    [25-29]");
+		f.write("\t"); foreach(i; 30 ..  35) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense   [30-34]");
+		f.write("\t"); foreach(i; 35 ..  41) f.writef("%+7.4f, ", weight[i]); f.writeln("          // positional  [35-46]");
+		f.write("\t"); foreach(i; 41 ..  47) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach(i; 47 ..  51) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // P structure [47-54]");
+		f.write("\t"); foreach(i; 51 ..  55) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach(i; 55 ..  56) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [55]");
+		f.writeln("\t// Endgame");
+		f.write("\t"); foreach(i; 56 ..  63) f.writef("%+7.4f, ", weight[i]); f.writeln(" // material    [56-62]");
+		f.write("\t"); foreach(i; 63 ..  69) f.writef("%+7.4f, ", weight[i]); f.writeln("          // mobility    [63-68]");
+		f.write("\t"); foreach(i; 69 ..  75) f.writef("%+7.4f, ", weight[i]); f.writeln("          // attack      [69-74]");
+		f.write("\t"); foreach(i; 75 ..  81) f.writef("%+7.4f, ", weight[i]); f.writeln("          // defense     [75-80]");
+		f.write("\t"); foreach(i; 81 ..  86) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack    [81-85]");
+		f.write("\t"); foreach(i; 86 ..  91) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense   [86-90]");
+		f.write("\t"); foreach(i; 91 ..  95) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // positional  [91-94]");
+		f.write("\t"); foreach(i; 95 ..  99) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // P structure [95-102]");
+		f.write("\t"); foreach(i; 99 .. 103) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach(i;103 .. 104) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [103]");
+		f.writeln("];"); 
+		f.flush();
+	}
+
+
 	/* Simplex relative size */
-	real getVolume() {
-		real s = 0.0;
+	double getVolume() {
+		double s = 0.0;
 		foreach (ref p; P) if (p != P[best]) s += p.diff(P[best]);
-		real n = P[best].norm();
+		double n = P[best].norm();
 		if (n < 1.0) n = 1.0; // ?
 		return s / n;
 	}
@@ -254,10 +291,10 @@ class Amoeba {
 	}
 
 	/* optimize K in the using the golden section search. */
-	void optimizeK(const real tolerance, const int maxIter) {
-		real a, b, c, d, fc, fd;
+	void optimizeK(const double tolerance, const int maxIter) {
+		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
-		const real gr = (sqrt(5.0) - 1.0) / 2.0;
+		const double gr = (sqrt(5.0) - 1.0) / 2.0;
 		int iter;
 
 		v.set(weights, isTunable);
@@ -291,11 +328,11 @@ class Amoeba {
 	}
 
 	/* init the Simplex */
-	void init(in real volume) {
+	void init(in double volume) {
 		const size_t size = countTunable() + 1;
-		const real a = volume / size * sqrt(2.0);
-		const real δi = a * (sqrt(size - 1.0) + size - 1.0);
-		const real δj = a * (sqrt(size - 1.0) - 1.0);
+		const double a = volume / size * sqrt(2.0);
+		const double δi = a * (sqrt(size - 1.0) + size - 1.0);
+		const double δj = a * (sqrt(size - 1.0) - 1.0);
 
 		P.length = size;
 		foreach(ref p; P) p = Vector(size - 1);
@@ -313,13 +350,13 @@ class Amoeba {
 	}
 
 	/* Amoeba or simplex optimization algorithm. */
-	void tune(in real tolerance, in int maxIter, in bool adaptative = false)	{
+	void tune(in double tolerance, in int maxIter, in bool adaptative = false) 	{
 		Vector C, Pr, Pe, Pc;
-		real size, flat, υ, yBest = +real.max, yr, ye, yc;
+		double size, flat, υ, yBest = +double.max, yr, ye, yc;
 		immutable int minIter = 10;
-		immutable real tiny = tolerance * tolerance;
-		immutable real  ν = adaptative ? P.length - 1 : 2.0;
-		immutable real α = 1.0, β = 1.0 + 2.0 / ν, γ = 0.75 - 1.0 / (2.0 * ν), δ = 1.0 - 1.0 / ν;
+		immutable double tiny = tolerance * tolerance;
+		immutable double  ν = adaptative ? P.length - 1 : 2.0;
+		immutable double α = 1.0, β = 1.0 + 2.0 / ν, γ = 0.75 - 1.0 / (2.0 * ν), δ = 1.0 - 1.0 / ν;
 		enum Stage {init, reflection, expansion, contraction, reduction}
 		Stage stage;
 
@@ -329,7 +366,7 @@ class Amoeba {
 			if (yBest > y[best]) {
 				yBest = y[best];
 				P[best].get(weights, isTunable);
-				Eval.printWeights(weights);
+				printWeights(weights);
 			}
 		
 			flat = (y[worst] - y[best]) / (y[best] + y[worst]);
@@ -380,7 +417,7 @@ class Amoeba {
 void main(string [] args) {
 	int [] range;
 	int maxIter = 3000;
-	real size = 0.1, tolerance = 0.001;
+	double size = 0.1, tolerance = 0.001;
 	string weightFile, gameFile;
 
 	getopt(args, "iter|i", &maxIter , "size|s", &size, "tolerance|t", &tolerance, "range|r", &range,
@@ -401,7 +438,7 @@ void main(string [] args) {
 	
 	if (weightFile.length > 0) {
 		std.stdio.File file = std.stdio.File(weightFile, "w");
-		Eval.printWeights(amoeba.weights, file);
+		Amoeba.printWeights(amoeba.weights, file);
 		file.close();				
 	}
 }

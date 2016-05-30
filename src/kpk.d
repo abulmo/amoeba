@@ -17,13 +17,13 @@ enum size = 24 * 64 * 64 * 2;
 byte [size] result;
 
 /* compute the index to the result table from the square coordinates */
-int getIndex(in Square p, in Square wk, in Square bk, in Color c) pure {
+int getIndex(in Square p, in Square wk, in Square bk, in Color c) {
 	int x = 4 * rank(p) + file(p) - 4;
 	return (x << 13) | (wk << 7) | (bk << 1) | c;
 }
 
 /* from an index, compute the position */
-void getSquares(in int i, ref Square p, ref Square wk, ref Square bk, ref Color player) pure {
+void getSquares(in int i, ref Square p, ref Square wk, ref Square bk, ref Color player) {
 	int x = i >> 13;
 	p  = toSquare(x & 3, x / 4 + 1);
 	wk = cast (Square) ((i >> 7) & 63);
@@ -32,7 +32,7 @@ void getSquares(in int i, ref Square p, ref Square wk, ref Square bk, ref Color 
 }
 
 /* bit x */
-ulong bit(in int x) pure {
+ulong bit(in int x) {
 	return 1UL << x;
 }
 

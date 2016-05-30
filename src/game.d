@@ -33,7 +33,7 @@ class Game {
 	}
 
 	/* reset the number of moves to 0 */
-	void clear() pure {
+	void clear() {
 		name[Color.white] = "";
 		name[Color.black] = "";
 		moves.length = 0;
@@ -41,7 +41,7 @@ class Game {
 	}
 
 	/* append a move */
-	void push(in Move m) pure {
+	void push(in Move m) {
 		moves ~= m;
 	}	
 	
@@ -54,7 +54,7 @@ class Game {
 	}		
 
 	/* game result */
-	bool getResult(in string s, out Result r) {
+	bool getResult(in string s, out Result r) const {
 		if (s == "1-0") r = Result.whiteWin;
 		else if (s == "0-1") r = Result.blackWin;
 		else if (s == "1/2-1/2") r = Result.draw;

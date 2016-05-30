@@ -15,29 +15,29 @@ import std.stdio, std.ascii, std.format, std.string, std.algorithm;
 alias Move = ushort;
 
 /* from square */
-Square from(in Move move) pure @property {
+Square from(in Move move) @property {
 	return cast (Square) (move & 63);
 }
 
 /* to square */
-Square to(in Move move) pure @property {
+Square to(in Move move) @property {
 	return cast (Square) ((move >> 6) & 63);
 }
 
 /* Promoted piece (if any) */
-Piece promotion(in Move move) pure @property {
+Piece promotion(in Move move) @property {
 	return cast (Piece) ((move >> 12) & 7);
 }
 
 /* convert a move into a string */
-string toString(in Move move) pure {
+string toString(in Move move) {
 	if (move.promotion) return format("%s%s%c", move.from, move.to, toChar(move.promotion));
 	else if (move) return format("%s%s", move.from, move.to);
 	else return "0000";
 }
 
 /* convert a string into a move */
-Move toMove(string s) pure {
+Move toMove(string s) {
 	if (s.length < 4) return 0;
 	Piece promotion;
 	Square from = toSquare(s[0..2]);
@@ -47,8 +47,7 @@ Move toMove(string s) pure {
 }
 
 /* convert a string using standard algebraic notation (SAN) into a move */
-Move fromSan(in string s, Board b) pure
-{
+Move fromSan(in string s, Board b) {
 	int r, f;
 	Square from, to;
 	Piece promotion = Piece.none;
@@ -140,20 +139,20 @@ private:
 	static immutable int doublon = int.min;
 
 	/* select the best move according to its value */
-	void selectValuableMove() pure {
+	void selectValuableMove() {
 		size_t k = index;
 		foreach (i; index + 1 .. n) if (value[i] > value[k]) k = i;
 		if (k > index) exchange(index, k);
 	}
 	
 	/* exchange two moves */
-	void exchange(in size_t i, in size_t k) pure {
+	void exchange(in size_t i, in size_t k) {
 		swap(move[i], move[k]);
 		swap(value[i], value[k]);
 	}
 
 	/* insert a move & its value at the current index position */
-	void insert(in Move m, in int v) pure {
+	void insert(in Move m, in int v) {
 		move[n] = m;
 		value[n] = v;
 		exchange(index, n);
@@ -161,7 +160,7 @@ private:
 	}
 
 	/* score capture using MVVLVA & punishing bad capture */
-	void generateCapture(Board board) pure {
+	void generateCapture(Board board) {
 		board.generateMoves!(Generate.capture)(this);
 		foreach(i; index .. n) {
 			if (move[i] == ttMove[0]) value[i] = doublon;
@@ -181,7 +180,7 @@ private:
 	}
 
 	/* score */
-	void generateQuiet(Board board) pure {
+	void generateQuiet(Board board) {
 		size_t oldN = n;
 		board.generateMoves!(Generate.quiet)(this);
 		foreach (i; oldN .. n) {
@@ -199,7 +198,7 @@ private:
 	}
 
 	/* score */
-	void generateEvasions(Board board) pure {
+	void generateEvasions(Board board) {
 		board.generateEvasions(this);
 		foreach (i; 0 .. n) {
 			if (move[i] == ttMove[0]) value[i] = ttBonus;
@@ -222,12 +221,12 @@ private:
 public:
 
 	/* reset to initial state so that foreach loop can be called again */
-	void reset() pure {
+	void reset() {
 		index = 0;
 	}
 
 	/* init (from main search) */
-	void init(in bool inCheck, const ref Move [2] ttm, const ref Move[Color.size] km, const ref Move r, const ref ushort [Square.size * CPiece.size] h) pure {
+	void init(in bool inCheck, const ref Move [2] ttm, const ref Move[Color.size] km, const ref Move r, const ref ushort [Square.size * CPiece.size] h) {
 		ttMove = ttm;
 		killer = km;
 		refutation = r;
@@ -238,7 +237,7 @@ public:
 	}
 	
 	/* init (from quiescence search) */
-	void init(in bool inCheck, const ref Move [2] ttm) pure {
+	void init(in bool inCheck, const ref Move [2] ttm) {
 		ttMove = ttm;
 		killer[] = 0;
 		refutation = 0;
@@ -249,7 +248,7 @@ public:
 	}
 
 	/* staged - move generation (aka spaghetti code) */
-	ref Move selectMove(Board board) pure {
+	ref Move selectMove(Board board) {
 		immutable Stage oldStage = stage;
 
 		final switch(stage) {
@@ -333,12 +332,12 @@ public:
 	}
 
 	/* length of the array */
-	size_t length() pure const @property {
+	size_t length() const @property {
 		return n;
 	}
 
 	/* insert Best Move as first move */
-	ref void setBest(in Move m) pure {
+	ref void setBest(in Move m) {
 		foreach (i; 0 .. n) if (m == move[i]) {
 			int v = value[i];
 			foreach (k; 0 .. i) {
@@ -351,35 +350,35 @@ public:
 	}
 
 	/* get front move */
-	ref const(Move) front() pure {
+	ref const(Move) front() {
 		return move[index];
 	}
 
 	/* pop first move */
-	void popFront() pure {
+	void popFront() {
 		++index;
 	}
 
 	/* empty */
-	bool empty() pure @property {
+	bool empty() @property {
 		return index == n;
 	}
 
 	/* append a move built from origin & destination squares */
-	ref Moves push(in Square from, in Square to) pure {
+	ref Moves push(in Square from, in Square to) {
 		move[n++] = (from | to << 6);
 		return this;
 	}
 
 	/* append a move */
-	void push(in Move m, in int v = 0) pure {
+	void push(in Move m, in int v = 0) {
 		move[n] = m;
 		value[n] = v;
 		++n;
 	}
 
 	/* append promotions from origin & destination squares */
-	ref Moves pushPromotions(in Square from, in Square to) pure {
+	ref Moves pushPromotions(in Square from, in Square to) {
 		move[n++] = (from | to << 6 | Piece.queen << 12);
 		move[n++] = (from | to << 6 | Piece.knight << 12);
 		move[n++] = (from | to << 6 | Piece.rook << 12);
@@ -388,7 +387,7 @@ public:
 	}
 
 	/* generate all moves */
-	ref Moves generate(Board board) pure {
+	ref Moves generate(Board board) {
 		index = n = 0;
 		if (board.inCheck) board.generateEvasions(this);
 		else board.generateMoves(this);
@@ -396,7 +395,7 @@ public:
 	}
 
 	/* convert to string */
-	string toString() pure const {
+	string toString() const {
 		string s;
 		foreach(m; move[0..n]) s ~= m.toString() ~ " ";
 		return s;
@@ -413,12 +412,12 @@ public:
 	}
 
 	/* is the first move ? */
-	bool isFirst(in Move m) pure const {
+	bool isFirst(in Move m) const {
 		return m == move[0];
 	}
 
 	/* opIndex */
-	ref const(Move) opIndex(in size_t i) pure const {
+	ref const(Move) opIndex(in size_t i) const {
 		 return move[i];
 	}	
 }
@@ -433,50 +432,50 @@ struct Line {
 	int n;
 
 	/* clear */
-	ref Line clear() pure {
+	ref Line clear() {
 		n = 0;
 		return this;
 	}
 
 	/* add a move */
-	ref Line push(in Move m) pure {
+	ref Line push(in Move m) {
 		assert(n < plyMax);
 		move[n++] = m;
 		return this;
 	}
 
 	/* remove the last pushed move & return it */
-	ref Line pop() pure {
+	ref Line pop() {
 		assert(n > 0);
 		--n;
 		return this;
 	}
 
 	/* add another line */
-	ref Line push(in Line l) pure {
+	ref Line push(in Line l) {
 		foreach (m; l.move[0 .. l.n]) push(m);
 		return this;
 	}
 
 	/* set */
-	ref Line set(in Move m, in Line l) pure {
+	ref Line set(in Move m, in Line l) {
 		return clear().push(m).push(l);
 	}
 
 	/* set */
-	ref Line set(in Line line) pure {
+	ref Line set(in Line line) {
 		return clear().push(line);
 	}
 
 	/* Convert it to a string */
-	string toString() pure const {
+	string toString() const {
 		string s;
 		foreach (m; move[0 .. n]) s ~= m.toString() ~ " ";
 		return s;
 	}
 
 	/* last pushed move */
-	Move top() pure const @property {
+	Move top() const @property {
 		return n > 0 ? move[n - 1] : 0;
 	}
 }

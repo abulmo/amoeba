@@ -18,7 +18,7 @@ void eventLoop(shared Event e) {
 class Uci {
 	string name;
 	struct Time {
-		real remaining, increment;
+		double remaining, increment;
 		void clear() {
 			remaining = increment = 0.0;
 		}
@@ -38,12 +38,12 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba 1.1";
+		name = "Amoeba 082";
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
 		ucinewgame();
-		canPonder = true;
+		canPonder = false;
 		search.option.verbose = true;
 	}
 
@@ -51,16 +51,16 @@ class Uci {
 	void send(T...) (T args) {
 		writeln(args);
 		if (log.isOpen) {
-			log.writef("[%8.3f] %s> ", toad(chrono.time()), name);
+			log.writef("[%8.3f] %s> ", chrono.time(), name);
 			log.writeln(args);
 		}
 		stdout.flush();
 	}
 
 	/* set thinking time */
-	real setTime() {
+	double setTime() {
 		immutable  p = board.player;
-		real t = time[p].remaining;
+		double t = time[p].remaining;
 		int todo = 40;
 
 		if (t) {
@@ -76,7 +76,7 @@ class Uci {
 	}
 
 	/* set max time to use in hard (failing low) position */
-	real setExtraTime() {
+	double setExtraTime() {
 		immutable  p = board.player;
 		return (time[p].remaining + time[p].increment) * 0.1;
 	}
@@ -85,9 +85,9 @@ class Uci {
 	void uci() {
 		send("id name " ~ name);
 		send("id author Richard Delorme");
-		send("option name Ponder type check default true");
-		send("option name Hash type spin min 1 default 64 max 4096");
-		send("option name Log type check default true");
+		send("option name Ponder type check default false");
+		send("option name Hash type spin default 64 min 1 max 4096");
+		send("option name Log type check default false");
 		// add more options here...
 		send("uciok");
 	}
@@ -148,16 +148,16 @@ class Uci {
 		foreach(i, ref w ; words) {
 			if (w == "searchmoves") searchmoves(words);
 			else if (w == "ponder") isPondering = true;
-			else if (w == "wtime" && i + 1 < words.length) time[Color.white].remaining = 0.001 * to!real(words[i + 1]);
-			else if (w == "btime" && i + 1 < words.length) time[Color.black].remaining = 0.001 * to!real(words[i + 1]);
-			else if (w == "winc" && i + 1 < words.length) time[Color.white].increment = 0.001 * to!real(words[i + 1]);
-			else if (w == "binc" && i + 1 < words.length) time[Color.black].increment = 0.001 * to!real(words[i + 1]);
+			else if (w == "wtime" && i + 1 < words.length) time[Color.white].remaining = 0.001 * to!double(words[i + 1]);
+			else if (w == "btime" && i + 1 < words.length) time[Color.black].remaining = 0.001 * to!double(words[i + 1]);
+			else if (w == "winc" && i + 1 < words.length) time[Color.white].increment = 0.001 * to!double(words[i + 1]);
+			else if (w == "binc" && i + 1 < words.length) time[Color.black].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "movestogo" && i + 1 < words.length) movesToGo = to!int(words[i + 1]);
 			else if (w == "depth" && i + 1 < words.length) depthMax = to!int(words[i + 1]);
-			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!real(words[i + 1]);
-			else if (w == "infinite") time[board.player].increment = real.infinity;
+			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
+			else if (w == "infinite") time[board.player].increment = double.infinity;
 		}
-		search.go(depthMax, setTime(), setExtraTime(), isPondering);
+		search.go(depthMax, setTime(), setExtraTime(), isPondering); //TODO: add SearchMoves + Multipv
 		if (!isPondering) bestmove();
 	}
 
@@ -171,13 +171,13 @@ class Uci {
 		spawn(&eventLoop, event);
 		while (true) {
 			auto line = event.wait();
-			if (log.isOpen) log.writefln("[%8.3f] uci> %s", toad(chrono.time()), line);
+			if (log.isOpen) log.writefln("[%8.3f] uci> %s", chrono.time(), line);
 			if (line == null) break;
 			else if (line == "" || line[0] == '#') continue;
 			else if (findSkip(line, "uci")) uci();
 			else if (findSkip(line, "setoption")) setoption(line);
 			else if (findSkip(line, "ucinewgame")) ucinewgame();
-			else if (findSkip(line, "isready")) {writeln("readyok"); stdout.flush();}
+			else if (findSkip(line, "isready")) send("readyok");
 			else if (findSkip(line, "position")) position(line);
 			else if (findSkip(line, "go")) go(line);
 			else if (findSkip(line, "stop")) stop();

@@ -13,9 +13,9 @@ endif
 #gdc
 ifeq ($(DC),gdc)
 	ifeq ($(BUILD),popcount)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2
+		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -O3 -fweb -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -Ofast -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
+		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -O3 -fweb -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
 	else
 		DFLAGS = -O0 -g -fdebug -o $(EXE)
 	endif
@@ -27,9 +27,9 @@ endif
 #lcd2
 ifeq ($(DC),ldc2)
 	ifeq ($(BUILD),popcount)
-		DFLAGS = -O5 -release -boundscheck=off -singleobj -w -dw -d-version=withPopCount -mattr=+sse4.2,popcnt
+		DFLAGS = -O3 -release -boundscheck=off -singleobj -w -dw -d-version=withPopCount -mattr=+sse4.2,popcnt
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -O5 -release -boundscheck=off -singleobj -w -dw
+		DFLAGS = -O3 -release -boundscheck=off -singleobj -w -dw
 	else
 		DFLAGS = -O0 -g -gc
 	endif
@@ -63,10 +63,10 @@ ifeq ($(EXE),amoeba)
 	SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
 endif
 
-build : $(SRC)
+build :
 	$(DC) $(DFLAGS) $(SRC)
 
-build-pgo : $(SRC)
+build-pgo :
 	$(MAKE) clean
 	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
 	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft --depth=6 | grep perft; 

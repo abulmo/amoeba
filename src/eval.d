@@ -37,31 +37,36 @@ private:
 		int [Color.size] nPiece;
 		int stage;
 	}
-	struct Entry {
+	struct PawnEntry {
 		ulong code;
 		int [Color.size] score;
 	}
 
 	static immutable int [Piece.size] stageValue = [0, 0, 3, 3, 5, 10];
-	static immutable int ε = 200;
+
+	enum ε = 200;
+	enum centipawn = 1024;
+	enum halfcentipawn = 512;
 	Weight opening, endgame;
 	Stack [Limits.plyMax + 1] stack;
-	Entry [] pawnTable;
+	PawnEntry [] pawnTable;
 	int ply;
 
 	/* compute the attractive force of a target square x to a distant square y */
-	static real attraction(in Square x, in Square y) pure {
+	static double attraction(in Square x, in Square y) {
 		int r = rank(x) - rank(y);
 		int f = file(x) - file(y);
 		int d = (r * r + f * f);
 		return d == 0 ? 2.0 : 1.0 / d;
 	}
 
-	static int scale(in real w, in real f = 1600) pure {
+	/* scale a floating point weight & round it to an integer n so that n * 64 = 1 centipawn (1024) */
+	static int scale(in double w, in double f = 1600) {
 		return cast (int) (f * w + (w > 0 ? 0.5 : w < 0 ? -0.5 : 0.0));
 	}
 
-	static void adjustPawn(ref int [Square.size] p) pure {
+	/* adjust pawn positional weight, so that min positional = 0 */
+	static void adjustPawn(ref int [Square.size] p) {
 		foreach(x; Square.a1 .. Square.a2) p[x] = 0;
 		foreach(x; Square.a8 .. Square.size) p[x] = 0;
 		int m = int.max;
@@ -70,28 +75,26 @@ private:
 	}
 
 	/* Build positional array weights from an array of attractive squares */
-	static void buildPositional(ref int [Square.size] positional, in Square [] y, in real a, in bool isPawn) pure {
-		real w;	
-		real [Square.size] p;
+	static void buildPositional(ref int [Square.size] positional, in Square [] y, in double a, in bool isPawn) {
+		double w;	
+		double [Square.size] p;
 	
 		foreach (Square x; Square.a1 .. Square.size) {
 			w = attraction(x, y[0]);
-			foreach (i; 1 .. y.length) {
-				w = max(attraction(x, y[i]), w);
-			}
+			foreach (i; 1 .. y.length) w = max(attraction(x, y[i]), w);
 			p[x] = a * w;
 		}
 
 		if (!isPawn) {
-			real m = 0.0; foreach (x; Square.a1 .. Square.size) m += p[x]; m /= Square.size;
-			foreach (x; Square.a1 .. Square.size) p[x] -= w;
+			double m = 0.0; foreach (x; Square.a1 .. Square.size) m += p[x]; m /= Square.size;
+			foreach (x; Square.a1 .. Square.size) p[x] -= m;
 		}
 
 		foreach(x; Square.a1 .. Square.size) positional[x] += scale(p[x]);
 	}
 
 	/* remove a piece */
-	void remove(in Piece p, in Color c, in Square x) pure {
+	void remove(in Piece p, in Color c, in Square x) {
 		Stack *s = &stack[ply];
 		s.opening[c] -= opening.positional[p][forward(x, c)] + opening.material[p];
 		s.endgame[c] -= endgame.positional[p][forward(x, c)] + endgame.material[p];
@@ -100,7 +103,7 @@ private:
 	}
 
 	/* set a piece */
-	void set(in Piece p, in Color c, in Square x) pure {
+	void set(in Piece p, in Color c, in Square x) {
 		Stack *s = &stack[ply];
 		s.opening[c] += opening.positional[p][forward(x, c)] + opening.material[p];
 		s.endgame[c] += endgame.positional[p][forward(x, c)] + endgame.material[p];
@@ -109,7 +112,7 @@ private:
 	}
 
 	/* move a piece */
-	void deplace(in Piece p, in Color c, in Square from, in Square to) pure {
+	void deplace(in Piece p, in Color c, in Square from, in Square to) {
 		Stack *s = &stack[ply];
 		s.opening[c] -= opening.positional[p][forward(from, c)];
 		s.opening[c] += opening.positional[p][forward(to, c)];
@@ -118,7 +121,7 @@ private:
 	}
 
 	/* update material imbalance */
-	void updateImbalance(in Color player, in Color enemy) pure {
+	void updateImbalance(in Color player, in Color enemy) {
 		Stack *s = &stack[ply];
 		if (s.nPiece[player] == s.nPiece[enemy] + 1) {
 			s.opening[player] += opening.materialImbalance;
@@ -130,7 +133,7 @@ private:
 	}
 
 	/* mobility / attack / defense evaluation components */
-	int influence(Piece p)(in Board b, in Color player) pure const {
+	int influence(Piece p)(in Board b, in Color player) const {
 		immutable Color enemy = opponent(player);
 		immutable ulong P = b.color[player];
 		immutable ulong E = b.color[enemy];
@@ -166,7 +169,7 @@ private:
 	}
 
 	/* pawn structure */
-	int pawnStructure(in Board b, in Color player) pure const {
+	int pawnStructure(in Board b, in Color player) const {
 		immutable Color enemy = opponent(player);
 		immutable ulong pawns = b.piece[Piece.pawn];
 		immutable ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
@@ -207,18 +210,18 @@ private:
 				eMat += endgame.doublePawn.material;
 				ePos += endgame.doublePawn.positional;
 			}				
-			o += oMat + oPos * opening.positional[player][forward(x, player)] / 1024;
-			e += eMat + ePos * endgame.positional[player][forward(x, player)] / 1024;
+			o += oMat + oPos * opening.positional[player][forward(x, player)] / centipawn;
+			e += eMat + ePos * endgame.positional[player][forward(x, player)] / centipawn;
 		}
 		return o * s.stage + e * (64 - s.stage);
 	}
 
 
 	/* pawn structure with cache */
-	int pawnStructure(in Board b) pure const {
+	int pawnStructure(in Board b) const {
 		immutable Color player = b.player;
 		immutable Color enemy = opponent(player);
-		Entry h = pawnTable[b.pawnKey & (pawnTable.length - 1)];
+		PawnEntry h = pawnTable[b.pawnKey & (pawnTable.length - 1)];
 		if (h.code != b.pawnKey) {
 			h.code = b.pawnKey;
 			h.score[player] = pawnStructure(b, player);
@@ -228,22 +231,22 @@ private:
 	}
 
 	/* convert score to centipawns */
-	int toCentipawns(int score) pure const {
-		if (score < 0) score -= 512; else if (score > 0) score += 512;
-		return score / 1024;
+	int toCentipawns(int score) const {
+		if (score < 0) score -= halfcentipawn; else if (score > 0) score += halfcentipawn;
+		return score / centipawn;
 	}
 
 public:
 	/* clear */
-	void clear() pure {
-		pawnTable[] = Entry.init;
+	void clear() {
+		pawnTable[] = PawnEntry.init;
 	}
 
 	/* Constructor */
-	this(const ref real [] weight = weight.initialWeights, in size_t size = 65536) pure {
+	this(const ref double [] weight = weight.initialWeights, in size_t size = 65536) {
 		size_t i;
 		immutable Square [] pawnCenter = [Square.d4, Square.e4];
-		immutable Square [] pawnAdvance = [Square.a8, Square.b8, Square.c8, Square.d8, Square.e8, Square.f8, Square.g8, Square.h8]; //TODO: remove a8 & h8
+		immutable Square [] pawnAdvance = [Square.b8, Square.c8, Square.d8, Square.e8, Square.f8, Square.g8];
 		immutable Square [] knightOutpost = [Square.c6, Square.d6, Square.e6, Square.f6];
 		immutable Square [] knightCenter = [Square.d4, Square.e4, Square.d5, Square.e5];
 		immutable Square [] bishopCenter = [Square.c3, Square.f3, Square.c6, Square.f6];
@@ -253,7 +256,7 @@ public:
 
 		pawnTable.length = size;
 
-	// opening
+		// opening
 		// material
 		foreach(p; Piece.pawn .. Piece.king) opening.material[p] = scale(weight[i++]);
 		opening.material[Piece.king] = 0;
@@ -293,14 +296,14 @@ public:
 		opening.candidatePawn.material   = scale(weight[i++]);
 		opening.isolatedPawn.material    = scale(weight[i++]);
 		opening.doublePawn.material      = scale(weight[i++]);
-		opening.passedPawn.positional    = scale(weight[i++], 1024);
-		opening.candidatePawn.positional = scale(weight[i++], 1024);
-		opening.isolatedPawn.positional  = scale(weight[i++], 1024);
-		opening.doublePawn.positional    = scale(weight[i++], 1024);
+		opening.passedPawn.positional    = scale(weight[i++], centipawn);
+		opening.candidatePawn.positional = scale(weight[i++], centipawn);
+		opening.isolatedPawn.positional  = scale(weight[i++], centipawn);
+		opening.doublePawn.positional    = scale(weight[i++], centipawn);
 
 		opening.tempo = scale(weight[i++]);
 
-	// endgame
+		// endgame
 		// material
 		foreach(p; Piece.pawn .. Piece.king) endgame.material[p] = scale(weight[i++]);
 		endgame.material[Piece.king] = 0;
@@ -336,7 +339,7 @@ public:
 	}
 
 	/* start a new Eval */
-	void set(in Board board) pure {
+	void set(in Board board) {
 		Stack *s = &stack[0];
 
 		ply = 0;
@@ -378,7 +381,7 @@ public:
 	}
 
 	/* update the eval after a move */
-	void update(in Board b, in Move m) pure {
+	void update(in Board b, in Move m) {
 		immutable Color enemy = b.player;
 		immutable Color player = opponent(enemy);
 		immutable Piece p = m.promotion ? Piece.pawn : toPiece(b[m.to]);
@@ -427,12 +430,12 @@ public:
 	}
 
 	/* restore the evaluation */
-	void restore() pure {
+	void restore() {
 		--ply;
 	}
 
 	/* functor: lazy evaluation */
-	int opCall(in Board b) pure const {
+	int opCall(in Board b) const {
 		immutable Color player = b.player;
 		immutable Color enemy = opponent(player);
 		const Stack *s = &stack[ply];
@@ -453,54 +456,26 @@ public:
 		immutable lazyScore = toCentipawns(score);
 
 		if (α - ε <= lazyScore && lazyScore <= β + ε) {
+			// pieces inluence (mobility / attack / defense
 			score += influence!(Piece.pawn)(b, player)   - influence!(Piece.pawn)(b, enemy);
 			score += influence!(Piece.knight)(b, player) - influence!(Piece.knight)(b, enemy);
 			score += influence!(Piece.bishop)(b, player) - influence!(Piece.bishop)(b, enemy);
 			score += influence!(Piece.rook)(b, player)   - influence!(Piece.rook)(b, enemy);
 			score += influence!(Piece.queen)(b, player)  - influence!(Piece.queen)(b, enemy);
 			score += influence!(Piece.king)(b, player)   - influence!(Piece.king)(b, enemy);
+			// pawnStructure
 			score += pawnStructure(b);
 		}
 
-		if (b.fifty > 50) {
+		// some score corrections
+		score = kpk.rescale(b, score); // kpk table
+
+		if (b.fifty > 50) { // diminish score when fifty move rule approach
 			if (b.fifty >= 100) score = 0;
 			else score = score * (100 - b.fifty) / 50;
 		}
 
-		score = kpk.rescale(b, score);
-
 		return toCentipawns(score);
 	}
-
-	/* Write weights */
-	static printWeights(const ref real [] weight = initialWeights, std.stdio.File f = stdout) {
-		f.writeln("real [] initialWeights = [");
-		f.writeln("\t// Opening");
-		f.write("\t"); foreach(i;  0 ..   7) f.writef("%+7.4f, ", weight[i]); f.writeln(" // material    [ 0- 6]");
-		f.write("\t"); foreach(i;  7 ..  13) f.writef("%+7.4f, ", weight[i]); f.writeln("          // mobility    [ 7-12]");
-		f.write("\t"); foreach(i; 13 ..  19) f.writef("%+7.4f, ", weight[i]); f.writeln("          // attack      [13-18]");
-		f.write("\t"); foreach(i; 19 ..  25) f.writef("%+7.4f, ", weight[i]); f.writeln("          // defense     [19-24]");
-		f.write("\t"); foreach(i; 25 ..  30) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack    [25-29]");
-		f.write("\t"); foreach(i; 30 ..  35) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense   [30-34]");
-		f.write("\t"); foreach(i; 35 ..  41) f.writef("%+7.4f, ", weight[i]); f.writeln("          // positional  [35-46]");
-		f.write("\t"); foreach(i; 41 ..  47) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach(i; 47 ..  51) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // P structure [47-54]");
-		f.write("\t"); foreach(i; 51 ..  55) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach(i; 55 ..  56) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [55]");
-		f.writeln("\t// Endgame");
-		f.write("\t"); foreach(i; 56 ..  63) f.writef("%+7.4f, ", weight[i]); f.writeln(" // material    [56-62]");
-		f.write("\t"); foreach(i; 63 ..  69) f.writef("%+7.4f, ", weight[i]); f.writeln("          // mobility    [63-68]");
-		f.write("\t"); foreach(i; 69 ..  75) f.writef("%+7.4f, ", weight[i]); f.writeln("          // attack      [69-74]");
-		f.write("\t"); foreach(i; 75 ..  81) f.writef("%+7.4f, ", weight[i]); f.writeln("          // defense     [75-80]");
-		f.write("\t"); foreach(i; 81 ..  86) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack    [81-85]");
-		f.write("\t"); foreach(i; 86 ..  91) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense   [86-90]");
-		f.write("\t"); foreach(i; 91 ..  95) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // positional  [91-94]");
-		f.write("\t"); foreach(i; 95 ..  99) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // P structure [95-102]");
-		f.write("\t"); foreach(i; 99 .. 103) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach(i;103 .. 104) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [103]");
-		f.writeln("];"); 
-		f.flush();
-	}
-
 }
 

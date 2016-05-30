@@ -20,7 +20,7 @@ version (DMD) alias swapBytes = bswap;
 else version (LDC) alias swapBytes = llvm_bswap;
 else version(GNU) alias swapBytes = __builtin_bswap64;
 else {
-	ulong swapBytes(ulong b) pure {
+	ulong swapBytes(ulong b) {
 		b = ((b >>  8) & 0x00FF00FF00FF00FF) | ((b <<  8) & 0xFF00FF00FF00FF00);
 		b = ((b >> 16) & 0x0000FFFF0000FFFF) | ((b << 16) & 0xFFFF0000FFFF0000);
 		b = ((b >> 32) & 0x00000000FFFFFFFF) | ((b << 32) & 0xFFFFFFFF00000000);
@@ -29,16 +29,16 @@ else {
 }
 
 /* Check if a single bit is set */
-bool hasSingleBit(in ulong b) pure {
+bool hasSingleBit(in ulong b) {
 	return (b & (b - 1)) == 0;
 }
 
 /* Get the first bit set */
-version (LDC) int firstBit(ulong b) pure {return cast (int) llvm_cttz(b, true);}
+version (LDC) int firstBit(ulong b) {return cast (int) llvm_cttz(b, true);}
 else alias firstBit = bsf;
 
 /* Extract a bit */
-int popBit(ref ulong b) pure {
+int popBit(ref ulong b) {
 	immutable int i = firstBit(b);
 	b &= b - 1;
 	return i;
@@ -47,10 +47,10 @@ int popBit(ref ulong b) pure {
 /* Count the number of bits */
 version (withPopCount) {
 	version (GNU) alias countBits = __builtin_popcountll;
-	else version (LDC) int countBits(in ulong b) pure {return cast (int) llvm_ctpop(b);}
+	else version (LDC) int countBits(in ulong b) {return cast (int) llvm_ctpop(b);}
 	else alias countBits = _popcnt;
 } else {
-	int countBits(in ulong b) pure {
+	int countBits(in ulong b) {
 		ulong c = b
 			- ((b >> 1) & 0x7777777777777777)
 			- ((b >> 2) & 0x3333333333333333)
@@ -79,6 +79,17 @@ void writeBitboard(in ulong b, File f = stdout) {
 	f.writeln("  a b c d e f g h");
 }
 
+
+/*
+ * prefetch
+ */
+void prefetch(void *v) {
+	version (DMD) {}
+	version (GNU) __builtin_prefetch(v);
+	version (LDC) llvm_prefetch(v, 0, 3, 1);
+}
+
+
 /* 
  * struct Chrono
  */
@@ -101,8 +112,8 @@ struct Chrono {
 	}
 
 	/* return spent time in secs with decimals */
-	real time() const {
-		real t;
+	double time() const {
+		double t;
 		if (on) t = (TickDuration.currSystemTick() - tick).hnsecs;
 		else t = tick.hnsecs;
 		return 1e-7 * t;
@@ -110,7 +121,7 @@ struct Chrono {
 }
 
 /* remove characters between two strings */
-string findBetween(in string s, in string start, in string end) pure {
+string findBetween(in string s, in string start, in string end) {
 	size_t i, j;
 
 	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
@@ -121,7 +132,7 @@ string findBetween(in string s, in string start, in string end) pure {
 }
 
 /* remove characters between two strings. TODO: ("(((blabla)))", "(", ")") remove all */
-string removeBetween(in string s, in string start, in string end) pure {
+string removeBetween(in string s, in string start, in string end) {
 	size_t i, j;
 
 	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
@@ -149,12 +160,12 @@ class Event {
 	}
 
 	/* ring is empty */
-	shared bool empty() pure const @property {
+	shared bool empty() const @property {
 		return first == last;
 	}
 
 	/* ring is full */
-	shared bool full() pure const @property {
+	shared bool full() const @property {
 		return first == (last + 1) % ring.length;
 	}
 
@@ -192,7 +203,7 @@ class Event {
 	}
 
 	/* has event s */
-	shared bool has(string s) pure {
+	shared bool has(string s) {
 		return !empty && ring[first] == s;
 	}
 
@@ -204,11 +215,6 @@ class Event {
 			push(line);
 		} while (stdin.isOpen && line != "quit");
 	}
-}
-
-/* an ugly batracian */
-double toad(in real v) pure {
-	return cast (double) v;
 }
 
 /* Unit test */
