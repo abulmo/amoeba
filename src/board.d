@@ -11,7 +11,7 @@ import std.stdio, std.ascii, std.format, std.string, std.conv;
 import std.algorithm, std.getopt, std.math, std.random;
 
 /* limits */
-enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, historyMax = 32768}
+enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256, historyMax = 32768}
 
 /*
  * Color
@@ -137,7 +137,6 @@ Square popSquare(ref ulong b) {
 Square firstSquare(in ulong b) {
 	return cast (Square) firstBit(b);
 }
-
 
 /*
  * Miscs
@@ -523,12 +522,12 @@ private:
 	}
 
 	/* can castle kingside ? */
-	bool can_castle_kingside() const {
+	bool canCastleKingside() const {
 		return (stack[ply].castling & kingside[player]) != 0;
 	}
 
 	/* can castle queenside ? */
-	bool can_castle_queenside() const {
+	bool canCastleQueenside() const {
 		return (stack[ply].castling & queenside[player]) != 0;
 	}
 
@@ -900,10 +899,10 @@ public:
 	/* return true if a position is a draw */
 	Result isDraw() const  @property {
 		// repetition
-		int n_repetition = 0;
+		int nRepetition = 0;
 		immutable end = max(0, ply - stack[ply].fifty);
 		for (auto i = ply - 4; i >= end; i -= 2) {
-			if (stack[i].key.code == stack[ply].key.code && ++n_repetition >= 2) return Result.repetitionDraw;
+			if (stack[i].key.code == stack[ply].key.code && ++nRepetition >= 2) return Result.repetitionDraw;
 		}
 
 		// fifty move rule
@@ -912,13 +911,13 @@ public:
 		// lack of mating material
 		if (piece[Piece.pawn] + piece[Piece.rook] + piece[Piece.queen] == 0) {
 			// a single minor: KNK or KBK
-			immutable  n_minor = countBits(piece[Piece.knight] + piece[Piece.bishop]);
-			if (n_minor <= 1) return Result.insufficientMaterialDraw;
+			immutable  nMinor = countBits(piece[Piece.knight] + piece[Piece.bishop]);
+			if (nMinor <= 1) return Result.insufficientMaterialDraw;
 			// only bishops on same square color: KBBK
 			immutable  diff = abs(countBits(color[Color.white]) - countBits(color[Color.black]));
 			immutable blackSquares = 0x55aa55aa55aa55aa;
 			immutable whiteSquares = ~blackSquares;
-			if (diff == n_minor && piece[Piece.knight] == 0
+			if (diff == nMinor && piece[Piece.knight] == 0
 				&& ((piece[Piece.bishop] & blackSquares) == piece[Piece.bishop] || (piece[Piece.bishop] & whiteSquares) == piece[Piece.bishop])) return Result.insufficientMaterialDraw;
 		}
 
@@ -1186,11 +1185,11 @@ public:
 
 		// castling
 		if (type != Generate.capture) {
-			if (can_castle_kingside()
+			if (canCastleKingside()
 				&& (~piece[Piece.none] & mask[k].between[k + 3]) == 0
 				&& !isSquareAttacked(cast (Square) (k + 1), enemy)
 				&& !isSquareAttacked(cast (Square) (k + 2), enemy)) moves.push(k, cast (Square) (k + 2));
-			if (can_castle_queenside()
+			if (canCastleQueenside()
 				&& (~piece[Piece.none] & mask[k].between[k - 4]) == 0
 				&& !isSquareAttacked(cast (Square) (k - 1), enemy)
 				&& !isSquareAttacked(cast (Square) (k - 2), enemy)) moves.push(k, cast (Square) (k - 2));
@@ -1445,12 +1444,12 @@ public:
 		if (p == Piece.king) {
 			Square k = move.from;
 			if ((k == move.to - 2) && 
-				   (!can_castle_kingside 
+				   (!canCastleKingside 
 				|| (~piece[Piece.none] & mask[k].between[k + 3])
 				|| isSquareAttacked(cast (Square) (k + 1), enemy) 
 				|| isSquareAttacked(cast (Square) (k + 2), enemy))) return fail(Reason.illegalCastling);
 			if ((k == move.to + 2) &&
-				   (!can_castle_queenside()
+				   (!canCastleQueenside()
 				|| (~piece[Piece.none] & mask[k].between[k - 4])
 				|| isSquareAttacked(cast (Square) (k - 1), enemy)
 				|| isSquareAttacked(cast (Square) (k - 2), enemy))) return fail(Reason.illegalCastling);
