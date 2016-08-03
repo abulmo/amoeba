@@ -111,14 +111,52 @@ Move fromSan(in string s, Board b) {
 	throw new Error("Bad SAN : '" ~ s ~ "'");
 }
 
+/* convert a move to a string using Standard Algebraic Notation (SAN) */
+string toSan(in Move move, Board board) {
+	string f = "abcdefgh", r = "12345678", s;
+	int nSameFile, nSameTo;
+	Moves moves = void;
+	immutable Piece p = toPiece(board[move.from]);
+
+	if (move == 0) s = "@@@@";
+	else if (p == Piece.king && move.to == move.from + 2) s = "O-O";
+	else if (p == Piece.king && move.to == move.from - 2) s = "O-O-O";
+	else {
+		if (p != Piece.pawn) {
+			moves.generate(board);
+			foreach (m; moves) {
+				if (move.to == m.to && p == toPiece(board[m.from]) && move.from != m.from) {
+					++nSameTo;
+					if (file(move.from) == file(m.from)) ++nSameFile;
+				}
+			}
+			s ~= p.toChar();
+		}
+		if ((p == Piece.pawn && file(move.from) != file(move.to)) || nSameTo > nSameFile) s ~= f[file(move.from)];
+		if (nSameFile) s ~= r[rank(move.from)];
+		if ((p == Piece.pawn && file(move.from) != file(move.to)) || board[move.to]) s ~= 'x';
+		s ~= format("%s", move.to);
+		if (move.promotion) s ~= "=" ~ toChar(move.promotion);
+	}
+
+	if (board.giveCheck(move)) {
+		board.update(move);
+			moves.generate(board);
+			if (moves.length) s ~= '+'; else s ~= '#';
+		board.restore(move);
+	}
+	
+	return s;
+}
+
 /*
  * Moves
  */
 
 struct Moves {
 public:
-	Move[256] move;
-	int [256] value;
+	Move[Limits.movesMax] move;
+	int [Limits.movesMax] value;
 	size_t index;
 private:
 	size_t n;
@@ -159,7 +197,7 @@ private:
 		n++;
 	}
 
-	/* score capture using MVVLVA & punishing bad capture */
+	/* generate & score captures using MVVLVA & punishing bad capture */
 	void generateCapture(Board board) {
 		board.generateMoves!(Generate.capture)(this);
 		foreach(i; index .. n) {
@@ -177,9 +215,10 @@ private:
 			}
 		}
 		move[n] = 0;
+		value[n] = 0;
 	}
 
-	/* score */
+	/* generate & score quiet moves */
 	void generateQuiet(Board board) {
 		size_t oldN = n;
 		board.generateMoves!(Generate.quiet)(this);
@@ -195,9 +234,10 @@ private:
 			}
 		}
 		move[n] = 0;
+		value[n] = 0;
 	}
 
-	/* score */
+	/* generate & score check evading moves */
 	void generateEvasions(Board board) {
 		board.generateEvasions(this);
 		foreach (i; 0 .. n) {
@@ -336,17 +376,20 @@ public:
 		return n;
 	}
 
-	/* insert Best Move as first move */
-	ref void setBest(in Move m) {
-		foreach (i; 0 .. n) if (m == move[i]) {
-			int v = value[i];
-			foreach (k; 0 .. i) {
-				move[i - k] = move[i - k - 1];
-				value[i - k] = value[i - k - 1];
-			}
-			move[0] = m;
-			value[0] = v;
+	/* insert a move as ith move */
+	void setBest(in Move m, in size_t i = 0) {
+		foreach (j; 0 .. n) if (m == move[j]) {
+			foreach_reverse (k; i .. j) move[k + 1] = move[k];
+			move[i] = m;
+			auto v = value[j];
+			foreach_reverse (k; i .. j) value[k + 1] = value[k];
+			value[i] = v;
 		}
+	}
+
+	/* remove all moves */
+	void clear() {
+		index = n = 0;
 	}
 
 	/* get front move */
@@ -431,6 +474,11 @@ struct Line {
 	Move [plyMax] move;
 	int n;
 
+	/* length of the sequence */
+	size_t length() const @property {
+		return n;
+	}
+
 	/* clear */
 	ref Line clear() {
 		n = 0;
@@ -452,18 +500,18 @@ struct Line {
 	}
 
 	/* add another line */
-	ref Line push(in Line l) {
+	ref Line push(const ref Line l) {
 		foreach (m; l.move[0 .. l.n]) push(m);
 		return this;
 	}
 
 	/* set */
-	ref Line set(in Move m, in Line l) {
+	ref Line set(in Move m, const ref Line l) {
 		return clear().push(m).push(l);
 	}
 
 	/* set */
-	ref Line set(in Line line) {
+	ref Line set(const ref Line line) {
 		return clear().push(line);
 	}
 
@@ -477,6 +525,14 @@ struct Line {
 	/* last pushed move */
 	Move top() const @property {
 		return n > 0 ? move[n - 1] : 0;
+	}
+
+	/* swap */
+	void swap(ref Line line) {
+		Line tmp = void;
+		tmp.set(line);
+		line.set(this);
+		set(tmp);
 	}
 }
 
