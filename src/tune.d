@@ -290,7 +290,7 @@ class Amoeba {
 		return c;
 	}
 
-	/* optimize K in the using the golden section search. */
+	/* optimize K using the golden section search. */
 	void optimizeK(const double tolerance, const int maxIter) {
 		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
