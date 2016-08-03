@@ -2,6 +2,10 @@
 # Makefile to compile amoeba
 #
 
+TUNE_SRC = tune.d util.d board.d eval.d game.d kpk.d move.d search.d weight.d
+AMOEBA_SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
+TOURNEY_SRC = tourney.d board.d game.d move.d util.d 
+
 ifeq ($(BUILD),)
 	BUILD = fast
 endif
@@ -13,9 +17,9 @@ endif
 #gdc
 ifeq ($(DC),gdc)
 	ifeq ($(BUILD),popcount)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -O3 -fweb -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
+		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -O3 -flto -fwhole-program -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
 	else ifeq ($(BUILD),fast)
-		DFLAGS = -W -Wno-uninitialized -Wall -pedantic -O3 -fweb -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
+		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra  -O3 -flto -fwhole-program -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
 	else
 		DFLAGS = -O0 -g -fdebug -o $(EXE)
 	endif
@@ -36,7 +40,7 @@ ifeq ($(DC),ldc2)
 
 	PGO_GEN = -fprofile-instr-generate
 	PGO_USE = -fprofile-instr-use=amoeba.profdata
-	PGO_MERGE = ldc-profdata merge -output=amoeba.profdata ../amoeba-*.profraw
+	PGO_MERGE = ldc-profdata merge -output=amoeba.profdata amoeba-*.profraw
 
 endif
 
@@ -54,14 +58,22 @@ ifeq ($(DC),dmd)
 	PGO_MERGE = 
 endif
 
-#evaluation function weight tuning
-ifeq ($(EXE),tune)
-	SRC = tune.d util.d board.d eval.d game.d kpk.d move.d search.d weight.d
+# executable target
+ifeq ($(EXE),)
+	EXE = amoeba
 endif
 
+#amoeba
 ifeq ($(EXE),amoeba)
-	SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
+	SRC = $(AMOEBA_SRC)
+#tune
+else ifeq ($(EXE),tune)
+	SRC = $(TUNE_SRC)
+#tourney
+else ifeq ($(EXE),tourney)
+	SRC = $(TOURNEY_SRC)
 endif
+
 
 build :
 	$(DC) $(DFLAGS) $(SRC)
@@ -77,22 +89,19 @@ build-pgo :
 debug :
 	$(MAKE) BUILD=debug
 
-all:
-	$(MAKE) tune;
-	$(MAKE) amoeba;
-
-
-pgo:
+pgo: $(AMOEBA_SRC)
 	$(MAKE) build-pgo EXE=amoeba	
 
-tune:
+tune: $(TUNE_SRC)
 	$(MAKE) EXE=tune
 	
-amoeba:
+amoeba: $(AMOEBA_SRC)
 	$(MAKE) EXE=amoeba
 
+tourney: $(TOURNEY_SRC)
+	$(MAKE) EXE=tourney
 
 clean:
-	$(RM) *.o trace.* *.log *.gcda
+	$(RM) *.o trace.* *.log *.gcda *.profraw
 
 
