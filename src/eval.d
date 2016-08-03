@@ -418,15 +418,6 @@ public:
 			if (m.to == m.from + 2) deplace(Piece.rook, player, cast (Square) (m.from + 3), cast (Square) (m.from + 1));
 			if (m.to == m.from - 2) deplace(Piece.rook, player, cast (Square) (m.from - 4), cast (Square) (m.from - 1));
 		}
-
-		debug {
-			auto e = new Eval;
-			e.set(b);
-			foreach(c; Color.white..Color.size) {
-				assert (e.stack[0].opening[c] == s.opening[c]);
-				assert (e.stack[0].endgame[c] == s.endgame[c]);
-			}
-		}
 	}
 
 	/* restore the evaluation */
