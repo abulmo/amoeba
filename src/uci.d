@@ -38,7 +38,7 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba 1.2";
+		name = "Amoeba 1.3";
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
