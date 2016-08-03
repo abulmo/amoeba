@@ -154,6 +154,8 @@ final class Search {
 		Time time;
 		int depthMax;
 		int depthInit;
+		size_t multiPv;
+		bool easy;
 		bool isPondering;
 		bool verbose;
 	}
@@ -161,21 +163,65 @@ final class Search {
 	/* search Info */
 	struct Info {
 		ulong nNodes;
-		int score;
+		int [Limits.movesMax] score;
 		int depth;
 		double time;
-		Line pv;
+		Line [Limits.movesMax] pv;
+		size_t multiPv;
 
-		/* save curent results (except pv) */
-		void save(in int s, in ulong n, in int d, in double t) {
+		/* save current search infos (except pv / score) */
+		void update(in ulong n, in int d, in double t) {
 			nNodes = n; depth = d; time = t;
-			if (s > -Score.mate) score = s;
 		}
 
+		/* save current search infos (pv + score) */
+		void store(in int iPv, int s, ref Line p) {
+			Move m = p.move[0];
+			foreach (i; iPv + 1 .. multiPv) {
+				if (m == pv[i].move[0]) {					
+					foreach_reverse (j; iPv .. i + 1) {
+						score[j + 1] = score[j];
+						pv[j + 1].set(pv[j]);
+					}
+					break;
+				}
+			}
+			score[iPv] = s;	pv[iPv].set(p);
+		}
+
+		/* sort the pvs & score */
+		void sort(in int iPv) {
+			for (int j = iPv - 1; j >= 0 && score[j + 1] > score[j]; --j) {
+				swap(score[j + 1], score[j]);
+				pv[j].swap(pv[j + 1]);
+			}
+		}
+		
 		/* clear results */
-		void clear() {
-			nNodes = 0; score = 0; depth = 0; time = 0.0;
-			pv.clear();
+		void clear(in size_t n) {
+			nNodes = 0; depth = 0; time = 0.0;
+			multiPv = n;
+			foreach (i; 0 .. multiPv) {
+				score[i] = 0;
+				pv[i].clear();
+			}
+		}	
+
+		/* write the search result so far using UCI protocol */
+		void writeUCI(in int iPv, std.stdio.File f=stdout) const {
+			auto t = 1000 * time;
+			auto speed = nNodes / time;
+			foreach (i; 0 .. multiPv) {
+				auto d = depth - (i > iPv);
+				f.write("info depth ", d);
+				if (multiPv > 1) f.write(" multipv ", i + 1);
+				f.write(" score ");
+				if (score[i] > Score.high) f.write("mate ", (Score.mate + 1 - score[i]) / 2);
+				else if (score[i] < -Score.high) f.write("mate ", -(Score.mate + score[i]) / 2);
+				else f.write("cp ", score[i]);
+				f.writefln(" nps %.0f time %.0f nodes %s pv %s", speed, t, nNodes, pv[i]);
+			}
+			f.flush();
 		}
 	}
 	Board board;
@@ -184,7 +230,7 @@ final class Search {
 	shared Event event;
 	Option option;
 	Info info;
-	int ply;
+	int ply, iPv;
 	Moves rootMoves;
 	Line line;
 	Line [Limits.plyMax + 1] pv;
@@ -235,14 +281,15 @@ final class Search {
 		return stop;
 	}
 
-	/* get the best Move */
-	Move bestMove() const @property {
+	/* get the best move */
+	Move bestMove() @property {
+		if (rootMoves[0] != info.pv[0].move[0]) log("bug> best move mismatch: rm: %s pv[0]: %s", rootMoves[0].toString(), info.pv[0].move[0].toString());
 		return rootMoves[0];
 	}
 
-	/* get the best Move */
+	/* get the opponent expected move */
 	Move hint() const @property {
-		return info.pv.n > 1 ? info.pv.move[1] : 0;
+		return info.pv[0].n > 1 ? info.pv[0].move[1] : 0;
 	}
 
 	/* return the spent time */
@@ -269,16 +316,6 @@ final class Search {
 		if ((history[i] += d * d) > Limits.historyMax) {
 			foreach (ref h; history) h /= 2;
 		}
-	}
-
-	/* write the search result so far using UCI protocol */
-	void writeUCI(std.stdio.File f=stdout) const {
-		f.write("info depth ", info.depth, " score ");
-		if (info.score > Score.high) f.write("mate ", (Score.mate + 1 - info.score) / 2);
-		else if (info.score < -Score.high) f.write("mate ", -(Score.mate + info.score) / 2);
-		else f.write("cp ", info.score);
-		f.writefln(" nps %.0f time %.0f nodes %s pv %s", info.nNodes / info.time, 1000 * info.time, info.nNodes, info.pv);
-		f.flush();
 	}
 
 	/* update a move */
@@ -309,7 +346,7 @@ final class Search {
 		// search abort
 		if (abort()) return α;
 
-		// drawn position ? in eval !
+		// drawn position ?
 		if (board.isDraw) return 0;
 
 		// distance to mate pruning
@@ -344,6 +381,7 @@ final class Search {
 			update(m);
 				s = -qs(-β, -α);
 			restore(m);
+			if (stop) break;
 			if (s > bs && (bs = s) > α) {
 				tt.store(board.key, board.inCheck, ply, β, bs, m);
 				if ((α = bs) >= β) break;
@@ -353,9 +391,9 @@ final class Search {
 		return bs;
 	}
 
-	/* alpha-beta search (PVS/negascout variant) */
+	/* alpha-beta search (PvS/negascout variant) */
 	int αβ(int α, int β, in int d, in bool doPrune = true) {
-		immutable bool isPV = (α + 1 < β);
+		immutable bool isPv = (α + 1 < β);
 		int s, bs, e, r, iQuiet;
 		Moves moves = void;
 		Move m;
@@ -377,7 +415,7 @@ final class Search {
 		if (s < β && (β = s) <= α) return s;		
 
 		// transposition table probe
-		if (tt.probe(board.key, h) && h.depth >= d && !isPV) {
+		if (tt.probe(board.key, h) && h.depth >= d && !isPv) {
 			s = h.score(ply);
 			if (h.bound == Bound.exact || s >= β) return s;
 			if (s > bs) bs = s;
@@ -388,38 +426,35 @@ final class Search {
 
 		// selective search: "frontier" node pruning & null move
 		bool hasThreats = (board.inCheck || α >= Score.big || β <= -Score.big);
-		if (doPrune && !isPV && !hasThreats) {
-			immutable int [5] δ = [0, 100, 300, 500, 900];
+		if (doPrune && !isPv && !hasThreats) {
 			// pruning
-			if (d < δ.length) {
-				immutable sα = α - δ[d];
-				immutable sβ = β + δ[d];
-				s = eval(board);
-				// eval pruning (our position is very good, no need to search further)
-				if (s >= sβ) return β;
-				// razoring (our position is so bad, no need to search further)
-				else if (s <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
-			}
+			immutable  δ = 200 * d - 100;
+			immutable sα = α - δ;
+			immutable sβ = β + δ;
+			s = eval(board);
+			// eval pruning (our position is very good, no need to search further)
+			if (s >= sβ) return β;
+			// razoring (our position is so bad, no need to search further)
+			else if (s <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
+
 			// null move
-			if (line.top && (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king]))) {
-				r = 4;
+			if (d >= 2 && line.top && (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king]))) {
+				r = 3 + d / 4;
 				update(0);
-					s = -αβ(-β, -β + 1, d - r, true);
+					s = -αβ(-β, -β + 1, d - r);
 				restore(0);
 				if (s >= β) {
 					if (s >= Score.big) s = β;
-					if (d < 8 ||  αβ(β - 1, β, d - r, false) >= β) {
-						tt.store(board.key, d, ply, β, s, h.move[0]);
-						return s;
-					}
+					tt.store(board.key, d, ply, β, s, h.move[0]);
+					return s;
 				}
-				hasThreats |= (s < -Score.big);
+				hasThreats = (s < Score.low);
 			}
 		}
 
 		// IID
 		if (!h.move[0]) {
-			r = isPV ? 2 : max(4, 2 + d / 4);
+			r = isPv ? 2 : max(4, 2 + d / 4);
 			if (d > r) {
 				αβ(α, β, d - r, false);
 				tt.probe(board.key, h);
@@ -431,7 +466,7 @@ final class Search {
 
 		// loop thru all moves (and order them)
 		while ((m = moves.selectMove(board)) != 0) {
-			if (isPV) pv[ply + 1].clear();
+			if (isPv) pv[ply + 1].clear();
 			immutable bool isTactical = moves.value[moves.index - 1] > 0;
 			// check extension (if move is not loosing)
 			e = (board.inCheck && board.see(m) >= 0)  ? 1 : 0;
@@ -453,10 +488,11 @@ final class Search {
 				}
 			restore(m);
 			// best move ?
+			if (stop) break;
 			if (s > bs && (bs = s) > α) {
 				tt.store(board.key, d, ply, β, bs, m);
 				if (board[m.to] == CPiece.none && !board.inCheck) heuristicsUpdate(m, d);
-				if (isPV) pv[ply].set(m, pv[ply + 1]);
+				if (isPv) pv[ply].set(m, pv[ply + 1]);
 				if ((α = bs) >= β) return bs;
 			}
 		}
@@ -476,12 +512,12 @@ final class Search {
 		Entry h;
 
 		pv[0].clear();
-		rootMoves.reset();	
 
 		// loop thru all moves (and order them)
 		immutable bool hasThreats = (board.inCheck || α >= Score.big || β <= -Score.big);
-		foreach (ref m; rootMoves) {
-			immutable bool isTactical = rootMoves.value[rootMoves.index] > 0;
+		for (int i = iPv; i < rootMoves.length; ++i) {
+			Move m = rootMoves[i];
+			immutable bool isTactical = rootMoves.value[i] > 0;
 			pv[1].clear();
 			// check extension (if move is not loosing)
 			e = (board.inCheck && board.see(m) >= 0);
@@ -502,46 +538,65 @@ final class Search {
 					}
 				}
 			restore(m);
-			if (!stop && s > bs && (bs = s) > α) {
-				rootMoves.setBest(m);
+			if (stop) break;
+			if (s > bs && (bs = s) > α) {
+				rootMoves.setBest(m, iPv);
 				pv[0].set(m, pv[1]);
-				info.pv.set(pv[0]);
-				tt.store(board.key, d, 0, β, bs, m);
-				α = bs;
-				if (α >= β) break;
+				info.update(nNodes, d, time);
+				info.store(iPv, bs, pv[0]);
+				if (iPv == 0) tt.store(board.key, d, 0, β, bs, m); 
+				if ((α = bs) >= β) break;
+			} else if (i == iPv) {
+				pv[0].set(m, pv[1]);
+				info.store(iPv, s, pv[0]);
 			}
 		}
 
 		// store results
-		info.save(bs, nNodes, d, time);
+		info.update(nNodes, d, time);
 	}
 
 	/* aspiration window */
 	void aspiration(in int α, in int β, in int d) {
-		int λ, υ, up = +50, down = -50;
+		int λ, υ, up = +10, down = -10;
 
 		if (d <= 4) {
 			αβRoot(α, β, d);
 		} else do {
-				λ = max(α, info.score + down);
-				υ = min(β, info.score + up);
+				λ = max(α, info.score[iPv] + down);
+				υ = min(β, info.score[iPv] + up);
 				αβRoot(λ, υ, d);
-				if (info.score <= λ && down < -1) {
-					if (checkTime(0.381966 * option.time.max)) option.time.max = option.time.extra;
+				if (info.score[iPv] <= λ && down < -1) {
+					if (!checkTime(0.381966 * option.time.max)) option.time.max = option.time.extra;
 					down *= 2 ; up = 1;
-				} else if (info.score >= υ && up > 1) {
+				} else if (info.score[iPv] >= υ && up > 1) {
 					down = -1; up *= 2;
 				} else {
-					down = α - info.score;
-					up = β - info.score;
+					down = α - info.score[iPv];
+					up = β - info.score[iPv];
 				}
-		} while (!stop && ((info.score <= λ) || (info.score >= υ)));
+		} while (!stop && ((info.score[iPv] <= λ && λ > α) || (info.score[iPv] >= υ && υ < β)));
+	}
+
+	/* multiPv : search n best moves */
+	void multiPv(in size_t n, in int d) {
+		int β = Score.mate - 1;
+
+		// search the ith best move
+		for (iPv = 0; iPv < n && !stop; ++iPv) {
+			aspiration(2 - Score.mate, β, d);
+			if (info.score[iPv] >= β) aspiration(2 - Score.mate, Score.mate - 1, d);
+			info.sort(iPv);
+			β = info.score[iPv];
+		}
+		// sort rootmoves to match 'info' ordering
+		foreach (i; 0 .. n) rootMoves.setBest(info.pv[i].move[0], i);
 
 		if (option.verbose) {
-			writeUCI();
+			info.writeUCI(iPv - 1);
 			if (logFile.isOpen) {
 				logFile.write("search> ");
-				writeUCI(logFile);
+				info.writeUCI(iPv - 1, logFile);
 			}
 		}			
 	}
@@ -554,17 +609,18 @@ final class Search {
 		ply = 0;
 		nNodes = 0;
 		stop = false;
-		info.clear();
+		info.clear(option.multiPv);
 		heuristicsClear();
 		eval.set(board);
+		iPv = 0;
 	}
 
-	/* continue id */
+	/* continue iterative deepening */
 	bool persist(in int d) const {
-		return checkTime(0.618034 * option.time.max) && !stop && d <= option.depthMax && abs(info.score) <= Score.mate - d;
+		return checkTime(0.618034 * option.time.max) && !stop && d <= option.depthMax && info.score[option.multiPv - 1] <= Score.mate - d && info.score[0] >= d - Score.mate;
 	}
 
-	/* clear search setting */
+	/* clear search caches */
 	void clear() {
 		tt.clear(true);
 		heuristicsClear();
@@ -592,28 +648,29 @@ final class Search {
 	}
 
 	/* go search */
-	void go(in int depthMax, in double timeMax, in double timeExtra, bool ponder = false) {
+	void go(in int depthMax, in double timeMax, in double timeExtra, in bool easy = false, in int doMultiPv = 1, bool ponder = false) {
 		timer.start();
-			setup();
-			if (tt.date == 1) log("search> date in hashtable cleared");
 			option.time.max = timeMax;
-			option.time.extra = max(timeMax, timeExtra);
+			option.time.extra = max(timeMax, min(2.0 * timeMax, timeExtra));
 			option.depthMax = depthMax;
 			option.isPondering = ponder;
+			option.multiPv = max(1, min(doMultiPv, rootMoves.length));
+			option.easy = easy;
+			setup();
+			if (tt.date == 1) log("search> date in hashtable cleared");
 			log("search> go: %s", option);
 			log("search> moves: %s", rootMoves);
 			if (rootMoves.length == 0) {
 				rootMoves.push(0);
-			} else if (rootMoves.length == 1) {
-				aspiration(2 - Score.mate, Score.mate - 1, option.depthInit);			
+			} else if (option.easy && rootMoves.length == 1) {
+				multiPv(option.multiPv, option.depthInit);			
 			} else  {
 				for (int d = option.depthInit; persist(d); ++d) {
-					aspiration(2 - Score.mate, Score.mate - 1, d);
+					multiPv(option.multiPv, d);
 				}				
 			}
 		timer.stop();
 	}
-
 
 	/* go search without aspiration window nor iterating deepening */
 	void go(in int d) {
@@ -622,6 +679,8 @@ final class Search {
 			option.time.max = option.time.extra = double.infinity;
 			option.depthMax = d;
 			option.isPondering = false;
+			option.multiPv = 1;
+			option.easy = false;
 			info.score = αβ(2 - Score.mate, Score.mate - 1, d);
 		timer.stop();
 	}
@@ -634,7 +693,7 @@ final class Search {
 
 /* Look if epd best moves match the best move found. */
 bool epdMatch(string epd, Board b, in Move found) {
-	write("found ", found.toString());
+	write("found ", found.toSan(b));
 	string [] solutions = epd.findBetween("bm", ";").split();
 	if (solutions.length > 0) {
 		write("; expected = ", solutions);
@@ -651,8 +710,6 @@ bool epdMatch(string epd, Board b, in Move found) {
 				immutable Move m = fromSan(s, b);
 				if (m == found) return false;
 			}
-		} else {
-			writeln();
 		}
 	}
 	return true;
