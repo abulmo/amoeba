@@ -4,7 +4,7 @@
  * © 2016 Richard Delorme
  */
 
-import board, move, search, util;
+import board, move, util;
 import std.stdio, std.string, std.random, std.getopt, std.algorithm;
 
 /* 
