@@ -34,6 +34,8 @@ class Uci {
 	bool isPondering;
 	std.stdio.File log;
 	Chrono chrono;
+	int multipv;
+	bool easy;
 
 	/* constructor */
 	this() {
@@ -45,6 +47,8 @@ class Uci {
 		ucinewgame();
 		canPonder = false;
 		search.option.verbose = true;
+		multipv = 1;
+		easy = true;
 	}
 
 	/* send */
@@ -88,6 +92,8 @@ class Uci {
 		send("option name Ponder type check default false");
 		send("option name Hash type spin default 64 min 1 max 4096");
 		send("option name Log type check default false");
+		send("option name MultiPV type spin default 1 min 1 max 500");
+		send("option name UCI_AnalyseMode type check default false");
 		// add more options here...
 		send("uciok");
 	}
@@ -99,6 +105,8 @@ class Uci {
 		string value = line.strip().toLower();
 		if (name == "ponder") canPonder = to!bool(value);
 		else if (name == "hash") search.resize(to!size_t(value) * 1024 * 1024);
+		else if (name == "multipv") multipv = to!int(value);
+		else if (name == "uci_analysemode") easy = !to!bool(value);
 		else if (name == "log") {
 			if (to!bool(value)) {
 				log.open(name ~ to!string(thisProcessID) ~ ".log", "w");
@@ -157,7 +165,7 @@ class Uci {
 			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "infinite") time[board.player].increment = double.infinity;
 		}
-		search.go(depthMax, setTime(), setExtraTime(), isPondering); //TODO: add SearchMoves + Multipv
+		search.go(depthMax, setTime(), setExtraTime(), (easy && multipv == 1), multipv, isPondering); //TODO: add SearchMoves
 		if (!isPondering) bestmove();
 	}
 
