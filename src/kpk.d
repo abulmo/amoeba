@@ -8,7 +8,7 @@
 
 module kpk;
 
-import board, util;
+import board, eval, util;
 import std.algorithm, std.stdio;
 
 private:
@@ -111,7 +111,7 @@ void init () {
 }
 
 /* evaluate a kpk position, rescale the score according to win/draw/loss */
-int rescale(in Board b, in int score) {
+Value rescale(in Board b, in Value score) {
 	immutable ulong P = b.piece[Piece.pawn];
 	immutable ulong V = b.piece[Piece.none];
 	
