@@ -255,6 +255,7 @@ private:
 			}
 		}
 		move[n] = 0;
+		value[n] = 0;
 	}
 
 
