@@ -39,10 +39,9 @@ to be easy to read & understand.
 
 - algorithm tried but discarded:
   - delta pruning in quiescence search; 
-  - position with an upper bound (score <= α) stored in the transposition table; 
   - enhanced transposition cutoff (ETC); 
   - probcut
-  - etc.
+  - ...
 
 
 
