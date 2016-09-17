@@ -204,7 +204,7 @@ class Amoeba {
 			foreach (m; g.moves[0 .. 10]) search.board.update(m);
 			foreach (m; g.moves[10 .. $ - 10]) {
 				search.go(depth);
-				s = sigmoid(search.info.score);
+				s = sigmoid(search.info.score[0]);
 				r = result(search.board.player, g);
 				error += (r - s) ^^ 2;
 				++nBoard;
