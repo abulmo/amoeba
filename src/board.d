@@ -599,7 +599,6 @@ private:
 		}
 		// other occupancy (no more pins)
 		checkers |= attack!(Piece.knight)(k, piece[Piece.knight]);
-		// checkers |= mask[k].pawnAttack[player] & piece[Piece.pawn]; 
 		checkers |= attack!(Piece.pawn)(k, piece[Piece.pawn], occupancy, player);
 		checkers &= color[enemy];
 	}
