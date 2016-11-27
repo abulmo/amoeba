@@ -401,7 +401,7 @@ class Amoeba {
 	}
 
 	/* optimize 1 parameter using the golden section search. */
-	void optimizeWeight(in int i, const double tolerance, const int maxIter, in double [2] limits = [-2.0, 2.0]) {
+	void optimizeWeight(in size_t i, const double tolerance, const int maxIter, in double [2] limits = [-2.0, 2.0]) {
 		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
 		const double gr = (sqrt(5.0) - 1.0) / 2.0; // Golden ration
@@ -601,7 +601,7 @@ void main(string [] args) {
 
 	getopt(args, "iter|i", &maxIter , "size|s", &size, "tolerance|t", &tolerance, "range|r", &range, "stats|S", &stats,
 		"weight|w", &weightFile, "game|g", &gameFile, "cpu|n", &nCpu, "scratch|z", &fromScratch, "concept|c", &byConcept,
-		"piece|p", &byPiece, "optimizeK|k", &optimizeK, "adaptative|d", &adaptative, "bench|b", &bench, "individualy|i", &individualy;
+		"piece|p", &byPiece, "optimizeK|k", &optimizeK, "adaptative|d", &adaptative, "bench|b", &bench, "individualy|i", &individualy,
 		"help|h", &help);
 	if (help) {
 		writeln("tune [--iter|-i <integer>] [--size|-s <real>] [--tolerance|-t <real>] [--weight|-w <file>] [--game|-g <file>] [--range|-r <integer>/--scracth|-z/--all|-a/--piece|-p] [--adaptative|-d] [--help|-h]");
@@ -679,7 +679,7 @@ void main(string [] args) {
 	// tune each weight individually
 	} else if (individualy) {
 		if (optimizeK) amoeba.optimizeK(0.000001, 100);
-		foreach (i; 1 .. weights.length) optimize(i, tolerance, maxIter);
+		foreach (i; 1 .. amoeba.weights.length) amoeba.optimizeWeight(i, tolerance, maxIter);
 
 	// manual choice: tune by range of weights.
 	} else {
