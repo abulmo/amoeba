@@ -14,7 +14,7 @@ import std.algorithm, std.stdio;
 private:
 enum {illegal = 0, unknown = 1, draw = 2, win = 4};
 enum size = 24 * 64 * 64 * 2;
-byte [size] result;
+shared byte [size] result;
 
 /* compute the index to the result table from the square coordinates */
 int getIndex(in Square p, in Square wk, in Square bk, in Color c) {
@@ -112,13 +112,13 @@ void init () {
 
 /* evaluate a kpk position, rescale the score according to win/draw/loss */
 Value rescale(in Board b, in Value score) {
-	immutable ulong P = b.piece[Piece.pawn];
-	immutable ulong V = b.piece[Piece.none];
+	const ulong P = b.piece[Piece.pawn];
+	const ulong V = b.piece[Piece.none];
 	
 	if (countBits(P) == 1 && countBits(V) == 61) {
-		immutable ulong W = b.color[Color.white];
-		immutable ulong B = b.color[Color.black];
-		immutable ulong K = b.piece[Piece.king];
+		const ulong W = b.color[Color.white];
+		const ulong B = b.color[Color.black];
+		const ulong K = b.piece[Piece.king];
 		Square p = firstSquare(P);
 		Square wk = firstSquare(K & W);
 		Square bk = firstSquare(K & B);
@@ -147,10 +147,12 @@ unittest {
 
 	init();
 
+	write("Testing kpk..."); stdout.flush();
 	foreach (r; result) count[r]++;
 	assert (count[win] == 111282);
 	assert (count[draw] == 54394);
 	assert (count[unknown] == 0);
 	assert (count[illegal] == 30932);
+	writeln("ok"); stdout.flush();
 }
 
