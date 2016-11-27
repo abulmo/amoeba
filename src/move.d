@@ -61,11 +61,11 @@ Move fromSan(in string s, Board b) {
 	bool hasDigit(in int j) { return j < s.length && isDigit(s[j]); }
 
 	if (s.length >= 5 && (s[0..5] == "O-O-O" || s[0..5] == "0-0-0")) {
-		from = firstSquare(b.color[b.player] & b.piece[Piece.king]);
+		from = b.xKing[b.player];
 		to = cast (Square) (from - 2);
 		p = Piece.king;
 	} else if (s.length >= 3 && (s[0..3] == "O-O" || s[0..3] == "0-0")) {
-		from = firstSquare(b.color[b.player] & b.piece[Piece.king]);
+		from = b.xKing[b.player];
 		to = cast (Square) (from + 2);
 		p = Piece.king;
 	} else {
@@ -116,7 +116,7 @@ string toSan(in Move move, Board board) {
 	string f = "abcdefgh", r = "12345678", s;
 	int nSameFile, nSameTo;
 	Moves moves = void;
-	immutable Piece p = toPiece(board[move.from]);
+	const Piece p = toPiece(board[move.from]);
 
 	if (move == 0) s = "@@@@";
 	else if (p == Piece.king && move.to == move.from + 2) s = "O-O";
@@ -150,7 +150,7 @@ string toSan(in Move move, Board board) {
 }
 
 /*
- * Moves
+ * Moves : an array of legal moves
  */
 
 struct Moves {
@@ -248,7 +248,7 @@ private:
 				auto victim = toPiece(board[move[i].to]);			
 				if (victim || move[i].promotion) {
 					value[i] = vCapture[victim] + vPromotion[move[i].promotion] - vPiece[p];
-					if (board.see(move[i]) < 0) value[i] += badSeeMalus;
+					if (board.see(move[i]) < 0 && board.giveCheck(move[i]) < 2) value[i] += badSeeMalus;
 				} else {
 					value[i] = (p == Piece.king) ? 1 : -vPiece[p];
 				}
@@ -290,7 +290,7 @@ public:
 
 	/* staged - move generation (aka spaghetti code) */
 	ref Move selectMove(Board board) {
-		immutable Stage oldStage = stage;
+		const Stage oldStage = stage;
 
 		final switch(stage) {
 		// best move from transposition table
@@ -394,7 +394,7 @@ public:
 	}
 
 	/* get front move */
-	ref const(Move) front() {
+	ref const(Move) front() const {
 		return move[index];
 	}
 
@@ -404,7 +404,7 @@ public:
 	}
 
 	/* empty */
-	bool empty() @property {
+	bool empty() @property const {
 		return index == n;
 	}
 
@@ -445,6 +445,13 @@ public:
 		return s;
 	}
 
+	/* convert to string using SAN */
+	string toSan(Board board) const {
+		string s;
+		foreach(m; move[0..n]) s ~= m.toSan(board) ~ " ";
+		return s;
+	}
+
 	/* dump */
 	void dump() const {
 		foreach(i; 0 .. n) write(move[i].toString(), " [", value[i], "], ");
@@ -471,7 +478,7 @@ public:
  * struct Line: a sequence of moves
  */
 struct Line {
-	immutable plyMax = 100;
+	static immutable plyMax = 100;
 	Move [plyMax] move;
 	int n;
 
@@ -486,7 +493,7 @@ struct Line {
 		return this;
 	}
 
-	/* add a move */
+	/* append a move */
 	ref Line push(in Move m) {
 		assert(n < plyMax);
 		move[n++] = m;
@@ -500,7 +507,7 @@ struct Line {
 		return this;
 	}
 
-	/* add another line */
+	/* append another line */
 	ref Line push(const ref Line l) {
 		foreach (m; l.move[0 .. l.n]) push(m);
 		return this;
