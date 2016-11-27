@@ -5,12 +5,13 @@
  */
 
 import board, move, util;
-import std.stdio, std.string, std.random, std.getopt, std.algorithm;
+import std.stdio, std.string, std.algorithm;
+import core.atomic;
 
 /* 
  * Game
  */
-class Game {
+shared class Game {
 	string [Color.size] name;
 	Result result;
 	Move [] moves;
@@ -22,7 +23,7 @@ class Game {
 	}
 
 	/* copy constructor */
-	this(in Game g) {
+	this(in shared Game g) {
 		clear();
 		foreach(m; g.moves[0..$]) push(m);
 	}
@@ -63,7 +64,6 @@ class Game {
 		return true;
 	}
 
-		
 	/* read a game from a simple PGN (no FEN field) */
 	void read(std.stdio.File f) {
 		string text;
@@ -83,7 +83,7 @@ class Game {
 				if (line[1..7] == "Black ") name[Color.black] = line[7..$].findBetween("\"", "\"");
 				if (line[1..8] == "Result ") {
 					string s = line[8..$].findBetween("\"", "\"");
-					getResult(s, result);
+					getResult(s, r); result = r;
 				}
 			}
 		} while (readLine(f) && line[0] == '[');
@@ -121,6 +121,44 @@ class Game {
 				stderr.writeln("words ", words);
 				stderr.writeln(b);
 			}
+		}
+	}
+}
+
+
+/*
+ * GameBase a collection of Game.
+ */
+shared class GameBase {
+	Game [] games;
+	size_t index;
+	class Lock {}
+	Lock lock;
+
+	/* read all games */
+	this (in string file) {
+		auto f = std.stdio.File(file, "r");	
+		shared Game g;
+		lock = new shared Lock;
+		do {
+			g = new shared Game(f);
+			if (g.moves.length > 20) games ~= g;
+		} while (g.moves.length > 0);
+		writeln("read ", games.length, " games"); stdout.flush();
+		games ~= g;
+	}
+
+	/* reset index to 0 */
+	void clear() {
+		index = 0;
+	}	
+
+	/* get next game */
+	ref shared(Game) next(in bool loop = false) {
+		synchronized (lock) {
+			if (index < games.length) atomicOp!"+="(index, 1);
+			else if (loop) index = 1;
+			return games[index - 1];
 		}
 	}
 }
