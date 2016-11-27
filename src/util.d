@@ -10,7 +10,7 @@ import std.stdio, std.array, std.string;
 import core.bitop, core.time, core.thread;
 
 version (LDC) import ldc.intrinsics;
-version (GNU) import gcc.builtins;
+else version (GNU) import gcc.builtins;
 
 /*
  * bit utilities
@@ -39,7 +39,7 @@ else alias firstBit = bsf;
 
 /* Extract a bit */
 int popBit(ref ulong b) {
-	immutable int i = firstBit(b);
+	const int i = firstBit(b);
 	b &= b - 1;
 	return i;
 }
