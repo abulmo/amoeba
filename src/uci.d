@@ -238,7 +238,6 @@ class Uci {
 			else if (findSkip(line, "setoption")) setoption(line);
 			else if (findSkip(line, "register")) {}
 			else if (findSkip(line, "ucinewgame")) ucinewgame();
-			else if (findSkip(line, "isready")) send("readyok");
 			else if (findSkip(line, "position")) position(line);
 			else if (findSkip(line, "go")) go(line);
 			else if (findSkip(line, "stop")) stop();
