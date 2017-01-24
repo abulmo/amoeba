@@ -1,7 +1,7 @@
 /*
  * File uci.d
  * Universal Chess Interface.
- * © 2016 Richard Delorme
+ * © 2016-2017 Richard Delorme
  */
 
 module uci;
@@ -23,7 +23,6 @@ string arch() @property {
 
 	return a;
 }
-
 
 /* spawnable event loop function */
 void eventLoop(shared Event e) {
@@ -53,7 +52,7 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba 2.0." ~ arch;
+		name = "Amoeba 2.1-" ~ arch;
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
@@ -152,7 +151,7 @@ class Uci {
 		else if (findSkip(line, "fen")) board.set(line);
 		if (findSkip(line, "moves")) {
 			auto words = line.split();
-			foreach(w ; words) board.update(toMove(w));
+			foreach(w ; words) board.update(fromPan(w));
 		}
 		search.set(board);
 	}
@@ -160,15 +159,15 @@ class Uci {
 	/* search only some moves */
 	void searchmoves(string [] words) {
 		foreach(w ; words) {
-			Move m = toMove(w);
+			Move m = fromPan(w);
 			if (board.isLegal(m)) moves.push(m);
 		}
 	}
 
 	/* set bestmove */
 	void bestmove() {
-		if (search.hint != 0 && canPonder) send("bestmove ", search.bestMove.toString(), " ponder ", search.hint.toString());
-		else send("bestmove ", search.bestMove.toString());
+		if (search.hint != 0 && canPonder) send("bestmove ", search.bestMove.toPan(), " ponder ", search.hint.toPan());
+		else send("bestmove ", search.bestMove.toPan());
 	}
 
 	/* go */
@@ -232,17 +231,18 @@ class Uci {
 			if (log.isOpen) log.writefln("[%8.3f] uci> %s", chrono.time(), line);
 			if (line == null) break;
 			else if (line == "" || line[0] == '#') continue;
+			else if (findSkip(line, "ucinewgame")) ucinewgame();
 			else if (findSkip(line, "uci")) uci();
-			else if (findSkip(line, "debug")) { /* TODO? */ }
 			else if (findSkip(line, "isready")) send("readyok");
 			else if (findSkip(line, "setoption")) setoption(line);
-			else if (findSkip(line, "register")) {}
-			else if (findSkip(line, "ucinewgame")) ucinewgame();
 			else if (findSkip(line, "position")) position(line);
 			else if (findSkip(line, "go")) go(line);
 			else if (findSkip(line, "stop")) stop();
 			else if (findSkip(line, "ponderhit")) stop();
 			else if (findSkip(line, "quit")) break;
+			// unused
+			else if (findSkip(line, "debug")) {}
+			else if (findSkip(line, "register")) {}
 			// extension
 			else if (findSkip(line, "perft")) perft(line.split, board);
 			else if (findSkip(line, "show")) show(line);
