@@ -1,7 +1,7 @@
 /*
  * file kpk.d
  * KPK base
- * © 2016 Richard Delorme
+ * © 2016-2017 Richard Delorme
  */
 
 /* TODO: pack it onto a bitbase ? */
@@ -149,10 +149,10 @@ unittest {
 
 	write("Testing kpk..."); stdout.flush();
 	foreach (r; result) count[r]++;
-	assert (count[win] == 111282);
-	assert (count[draw] == 54394);
-	assert (count[unknown] == 0);
-	assert (count[illegal] == 30932);
+	claim(count[win] == 111282);
+	claim(count[draw] == 54394);
+	claim(count[unknown] == 0);
+	claim(count[illegal] == 30932);
 	writeln("ok"); stdout.flush();
 }
 
