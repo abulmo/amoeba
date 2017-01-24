@@ -1,7 +1,7 @@
 /*
  * File eval.d
  * Evaluation function
- * © 2016 Richard Delorme
+ * © 2016-2017 Richard Delorme
  */
 
 module eval;
@@ -58,6 +58,8 @@ private:
 		Value [Piece.size] material;
 		Value [Square.size][Piece.size] positional;
 		Value safePawnAdvance, unsafePawnAdvance;
+		Value safePawnBlock, unsafePawnBlock;
+		Value safePawnDouble, unsafePawnDouble;
 		Value [Piece.size] safeMobility, unsafeMobility;
 		Value [Piece.size] safeAttack, unsafeAttack;
 		Value [Piece.size] safeDefense, unsafeDefense;
@@ -167,32 +169,43 @@ private:
 	}
 
 	/* compute a bitboard of all squares attacked by a type of piece */
-	ulong getCoverage(Piece p)(in Board b, in Color player) {
-		const ulong P = b.color[player];
-		const ulong O = ~b.piece[Piece.none];
-		ulong attacker = b.piece[p] & P, a;
-		Square x;
+	void setCoverage(Piece p)(in Board b, in Color player) {
+		static if (p == Piece.pawn) {
+			const ulong O = ~b.piece[Piece.none];
+			ulong attacker = b.piece[p] & b.color[player];
 
-		while (attacker) {
-			x = popSquare(attacker);
-			coverage[x] = Board.coverage!p(x, O, player);
-			a |= coverage[x];
+			while (attacker) {
+				Square x = popSquare(attacker);
+				coverage[x] = Board.coverage!p(x, O, player);
+				attack[player] |= coverage[x];
+			}
+
 		}
-
-		return a;
 	}
 	
-	/* init the attack[] array */
-	void initAttack(in Board b) {
-	
-		foreach (player; Color.white .. Color.size) {
-			attack[player] = getCoverage!(Piece.pawn)(b, player)
-			               | getCoverage!(Piece.knight)(b, player)
-			               | getCoverage!(Piece.bishop)(b, player)
-			               | getCoverage!(Piece.rook)(b, player)
-			               | getCoverage!(Piece.queen)(b, player)
-			               | getCoverage!(Piece.king)(b, player);
+	/* compute a bitboard of all squares attacked by a type of piece */
+	void setCoverage(Piece p)(in Board b) {
+		const ulong O = ~b.piece[Piece.none];
+		ulong attacker = b.piece[p];
+
+		while (attacker) {
+			const Square x = popSquare(attacker);
+			coverage[x] = Board.coverage!p(x, O);
+			const Color player = toColor(b[x]);
+			attack[player] |= coverage[x];
 		}
+	}
+
+	/* init the coverage[] & attack[] arrays */
+	void initAttack(in Board b) {
+		attack[] = 0;
+		setCoverage!(Piece.pawn)(b, Color.white);
+		setCoverage!(Piece.pawn)(b, Color.black);
+		setCoverage!(Piece.knight)(b);
+		setCoverage!(Piece.bishop)(b);
+		setCoverage!(Piece.rook)(b);
+		setCoverage!(Piece.queen)(b);
+		setCoverage!(Piece.king)(b);
 	}
 
 	/* mobility / attack / defense evaluation components */
@@ -255,6 +268,10 @@ private:
 			a = player == Color.white ? attacker << 8 : attacker >> 8;
 			v += coeff.safePawnAdvance * countBits(a & V & ~A);
 			v += coeff.unsafePawnAdvance * countBits(a & V & A);
+			v += coeff.safePawnBlock * countBits(a & E & ~A);
+			v += coeff.unsafePawnBlock * countBits(a & E & A);
+			v += coeff.safePawnDouble * countBits(a & P & ~A);
+			v += coeff.unsafePawnDouble * countBits(a & P & A);
 		}
 
 		a = coverage[x];
@@ -448,6 +465,61 @@ private:
 		return v;
 	}
 
+	/* value of a piece */
+	Value pieceValue(in Piece p, in Color c, in Square x) const {
+		return coeff.material[p] + coeff.positional[p][forward(x, c)];
+	}
+
+	/* display eval weights for a single stage */
+	void showWeight(string phase)() const {
+		write(phase ~ ":\nmaterial: ");
+		foreach(p; Piece.pawn .. Piece.king) write(mixin("coeff.material[p]." ~ phase) / 16, ", ");
+		writefln("bishop pair: %d, imbalance: %d", mixin("coeff.bishopPair." ~ phase) / 16, mixin("coeff.materialImbalance." ~ phase) / 16);
+		writeln("positional:");
+		foreach(p; Piece.pawn .. Piece.size) {
+			write(p, ":");
+			foreach(Square x; Square.a1 .. Square.size) {
+				if (file(x) == 0) write("\n\t");
+				writef("%+4d, ", mixin("coeff.positional[p][x]." ~ phase) / 16);
+			}
+			writeln("");
+		}
+		write("safe mobility: ");
+		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeMobility[p]." ~ phase) / 16);
+		writeln("");
+		write("unsafe mobility: ");
+		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeMobility[p]." ~ phase) / 16);
+		writeln("");
+		write("safe attack: ");
+		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeAttack[p]." ~ phase) / 16);
+		writeln("");
+		write("unsafe attack: ");
+		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeAttack[p]." ~ phase) / 16);
+		writeln("");
+		write("safe defense: ");
+		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeDefense[p]." ~ phase) / 16);
+ 		writeln("");
+		write("unsafe defense: ");
+		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeDefense[p]." ~ phase) / 16);
+		writeln("");
+		write("King attack: ");
+		foreach(p; Piece.pawn .. Piece.king) writef("%+4d, ", mixin("coeff.kingAttack[p]." ~ phase) / 16);
+		writeln("");
+		write("King defense: ");
+		foreach(p; Piece.pawn .. Piece.king) writef("%+4d, ", mixin("coeff.kingDefense[p]." ~ phase) / 16);
+		writeln("");
+		writefln("King shield: %+4d", mixin("coeff.kingShield." ~ phase) / 16);
+		writefln("King storm: %+4d", mixin("coeff.kingStorm." ~ phase) / 16);
+		writeln("Pawn structure : material - positional");
+		writeln("passed pawn: ", mixin("coeff.passedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.passedPawn.positional." ~ phase) / 10, "%");
+		writeln("candidate pawn: ", mixin("coeff.candidatePawn.material." ~ phase) / 16,  ", ", mixin("coeff.candidatePawn.positional." ~ phase) / 10, "%");
+		writeln("isolated pawn: ", mixin("coeff.isolatedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.isolatedPawn.positional." ~ phase) / 10, "%");
+		writeln("double pawn: ", mixin("coeff.doublePawn.material." ~ phase) / 16,  ", ", mixin("coeff.doublePawn.positional." ~ phase) / 10, "%");
+		writeln("backward pawn: ", mixin("coeff.backwardPawn.material." ~ phase) / 16,  ", ", mixin("coeff.backwardPawn.positional." ~ phase) / 10, "%");
+		writeln("chained pawn: ", mixin("coeff.chainedPawn.material." ~ phase) / 16, ", ", mixin("coeff.chainedPawn.positional." ~ phase) / 10, "%");
+		writeln("tempo: ", mixin("coeff.tempo." ~ phase));
+	}
+
 public:
 	/* clear (the pawn hashtable) */
 	void clear() {
@@ -479,14 +551,12 @@ public:
 		coeff.materialImbalance.opening = scale(w[i++]);
 
 		// mobility
-		coeff.safePawnAdvance.opening   = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.safeMobility[p].opening    = scale(w[i++]);
-		coeff.unsafePawnAdvance.opening = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.unsafeMobility[p].opening  = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.safeAttack[p].opening      = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.unsafeAttack[p].opening    = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.safeDefense[p].opening     = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.unsafeDefense[p].opening   = scale(w[i++]);
+		coeff.safePawnAdvance.opening   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeMobility[p].opening    = scale(w[i++]);
+		coeff.unsafePawnAdvance.opening = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeMobility[p].opening  = scale(w[i++]);
+		coeff.safePawnBlock.opening     = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeAttack[p].opening      = scale(w[i++]);
+		coeff.unsafePawnBlock.opening   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeAttack[p].opening    = scale(w[i++]);
+		coeff.safePawnDouble.opening    = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeDefense[p].opening     = scale(w[i++]);
+		coeff.unsafePawnDouble.opening  = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeDefense[p].opening   = scale(w[i++]);
 		foreach(p; Piece.pawn .. Piece.king) coeff.kingAttack[p].opening      = scale(w[i++]);
 		foreach(p; Piece.pawn .. Piece.king) coeff.kingDefense[p].opening     = scale(w[i++]);
 
@@ -541,14 +611,12 @@ public:
 		coeff.materialImbalance.endgame = scale(w[i++]);
 
 		// mobility
-		coeff.safePawnAdvance.endgame   = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.safeMobility[p].endgame    = scale(w[i++]);
-		coeff.unsafePawnAdvance.endgame = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.unsafeMobility[p].endgame  = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.safeAttack[p].endgame      = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.unsafeAttack[p].endgame    = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.safeDefense[p].endgame     = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.size) coeff.unsafeDefense[p].endgame   = scale(w[i++]);
+		coeff.safePawnAdvance.endgame   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeMobility[p].endgame    = scale(w[i++]);
+		coeff.unsafePawnAdvance.endgame = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeMobility[p].endgame  = scale(w[i++]);
+		coeff.safePawnBlock.endgame     = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeAttack[p].endgame      = scale(w[i++]);
+		coeff.unsafePawnBlock.endgame   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeAttack[p].endgame    = scale(w[i++]);
+		coeff.safePawnDouble.endgame    = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeDefense[p].endgame     = scale(w[i++]);
+		coeff.unsafePawnDouble.endgame  = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeDefense[p].endgame   = scale(w[i++]);
 		foreach(p; Piece.pawn .. Piece.king) coeff.kingAttack[p].endgame      = scale(w[i++]);
 		foreach(p; Piece.pawn .. Piece.king) coeff.kingDefense[p].endgame     = scale(w[i++]);
 
@@ -577,7 +645,7 @@ public:
 		coeff.tempo.endgame = scale(w[i++]);
 	}
 
-	/* resize */
+	/* resize the pawn hash table */
 	void resize(size_t size) {
 		const lMax = size / PawnEntry.sizeof;
 		size_t l;
@@ -597,55 +665,6 @@ public:
 		setWeight(w);
 	}
 
-	/* display eval weights for a single stage */
-	void showWeight(string phase)() const {
-		write(phase ~ ":\nmaterial: ");
-		foreach(p; Piece.pawn .. Piece.king) write(mixin("coeff.material[p]." ~ phase) / 16, ", ");
-		writefln("bishop pair: %d, imbalance: %d", mixin("coeff.bishopPair." ~ phase) / 16, mixin("coeff.materialImbalance." ~ phase) / 16);
-		writeln("positional:");
-		foreach(p; Piece.pawn .. Piece.size) {
-			write(p, ":");
-			foreach(Square x; Square.a1 .. Square.size) {
-				if (file(x) == 0) write("\n\t");
-				writef("%+4d, ", mixin("coeff.positional[p][x]." ~ phase) / 16);
-			}
-			writeln("");
-		}
-		write("safe mobility: ");
-		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeMobility[p]." ~ phase) / 16);
-		writeln("");
-		write("unsafe mobility: ");
-		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeMobility[p]." ~ phase) / 16);
-		writeln("");
-		write("safe attack: ");
-		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeAttack[p]." ~ phase) / 16);
-		writeln("");
-		write("unsafe attack: ");
-		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeAttack[p]." ~ phase) / 16);
-		writeln("");
-		write("safe defense: ");
-		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeDefense[p]." ~ phase) / 16);
- 		writeln("");
-		write("unsafe defense: ");
-		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeDefense[p]." ~ phase) / 16);
-		writeln("");
-		write("King attack: ");
-		foreach(p; Piece.pawn .. Piece.king) writef("%+4d, ", mixin("coeff.kingAttack[p]." ~ phase) / 16);
-		writeln("");
-		write("King defense: ");
-		foreach(p; Piece.pawn .. Piece.king) writef("%+4d, ", mixin("coeff.kingDefense[p]." ~ phase) / 16);
-		writeln("");
-		writefln("King shield: %+4d", mixin("coeff.kingShield." ~ phase) / 16);
-		writefln("King storm: %+4d", mixin("coeff.kingStorm." ~ phase) / 16);
-		writeln("Pawn structure : material - positional");
-		writeln("passed pawn: ", mixin("coeff.passedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.passedPawn.positional." ~ phase) / 10, "%");
-		writeln("candidate pawn: ", mixin("coeff.candidatePawn.material." ~ phase) / 16,  ", ", mixin("coeff.candidatePawn.positional." ~ phase) / 10, "%");
-		writeln("isolated pawn: ", mixin("coeff.isolatedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.isolatedPawn.positional." ~ phase) / 10, "%");
-		writeln("double pawn: ", mixin("coeff.doublePawn.material." ~ phase) / 16,  ", ", mixin("coeff.doublePawn.positional." ~ phase) / 10, "%");
-		writeln("backward pawn: ", mixin("coeff.backwardPawn.material." ~ phase) / 16,  ", ", mixin("coeff.backwardPawn.positional." ~ phase) / 10, "%");
-		writeln("chained pawn: ", mixin("coeff.chainedPawn.material." ~ phase) / 16, ", ", mixin("coeff.chainedPawn.positional." ~ phase) / 10, "%");
-		writeln("tempo: ", mixin("coeff.tempo." ~ phase));
-	}
 	/* display eval weights */
 	void showWeight() const {
 		showWeight!"opening"();
@@ -756,7 +775,6 @@ public:
 				}
 			}
 		}
-
 		if (s.nPiece[Color.white] > s.nPiece[Color.black]) {
 			s.value[Color.white] += coeff.materialImbalance;
 		} else if (s.nPiece[Color.white] < s.nPiece[Color.black]) {
@@ -764,17 +782,19 @@ public:
 		}
 	}
 
-	/* update the evalation (material & positional) after a move */
+	/* update the evaluation (material & positional) after a move */
 	void update(in Board b, in Move m) {
 		const Color enemy = b.player;
 		const Color player = opponent(enemy);
 		const Piece p = m.promotion ? Piece.pawn : toPiece(b[m.to]);
 		const Piece v = b.stack[b.ply].victim;
-		Stack *s = &stack[ply + 1];
+		Stack *s = &stack[++ply];
 
-		++ply; stack[ply] = stack[ply - 1];
+		stack[ply] = stack[ply - 1];
 
+		// move
 		deplace(p, player, m.from, m.to);
+		// capture
 		if (v) {
 			remove(v, enemy, m.to);
 			if (v > Piece.pawn) updateImbalance(player, enemy);
@@ -782,7 +802,7 @@ public:
 				s.value[enemy] -= coeff.bishopPair;
 			}
 		}
-
+		// pawn move
 		if (p == Piece.pawn) {
 			if (m.promotion) {
 				remove(p, player, m.to);
@@ -795,6 +815,7 @@ public:
 				remove(Piece.pawn, enemy, toSquare(file(m.to), rank(m.from)));
 			}
 		}
+		// king move
 		if (p == Piece.king) {
 			s.kingZone[player] = Board.mask[m.to].king;
 			if (m.to == m.from + 2) deplace(Piece.rook, player, cast (Square) (m.from + 3), cast (Square) (m.from + 1));
@@ -818,6 +839,20 @@ public:
 		const Color enemy = opponent(player);
 		const Stack *s = &stack[ply];
 		const Value value = s.value[player] - s.value[enemy] + coeff.tempo;
+
+		return toCentipawns(value);
+	}
+
+	/* functor: lazy evaluation */
+	int opCall(in Board b, in Move m) const {
+		const Color player = b.player;
+		const Color enemy = opponent(player);
+		const Stack *s = &stack[ply];
+		Value value = coeff.tempo * 2;
+
+		if (m.promotion) value += pieceValue(m.promotion, player, m.to);
+		else value += pieceValue(toPiece(b[m.from]), player, m.to);
+		if (b[m.to]) value += pieceValue(toPiece(b[m.to]), enemy, m.to);
 
 		return toCentipawns(value);
 	}
