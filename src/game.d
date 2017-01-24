@@ -1,21 +1,214 @@
 /*
  * File game.d
- * PGN game reader
- * © 2016 Richard Delorme
+ * PGN game reader / writer
+ * © 2016-2017 Richard Delorme
  */
 
 import board, move, util;
-import std.stdio, std.string, std.algorithm;
+import std.stdio, std.string, std.algorithm, std.uni;
 import core.atomic;
 
+/*
+ * A buffered file reader
+ * TODO: RAII ?
+ */
+struct Reader {
+	string line;
+	std.stdio.File file;
+	bool skip;
+
+	/* open a file to read */
+	void open(string fileName) {
+		file.open(fileName, "r");	
+		writeln("reading ", fileName);
+	}
+
+	/* close the file */
+	void close() {
+		file.close();
+	}
+
+	/* read a line */
+	string read() {
+		if (!skip) line = file.readln();
+		skip = false;
+		return line;
+	}
+
+	/* unread a line (keep it in the buffer) */
+	void unread() {
+		skip = true;
+	}
+}
+	
+
+/*
+ * PGN tag
+ */
+struct Tag {
+private:
+	/* get the name of the tag  */
+	static string getName(in string line) {
+		foreach (i; 1 .. line.length) {
+			if (isSpace(line[i])) return line[1 .. i];
+		}
+		claim(0);
+		return null;
+	}
+
+	/* get the value of the tag */
+	static string getValue(in string line) {
+		size_t a = 1, b = line.length - 1;		
+		foreach (i; 1 .. line.length) {
+			if (line[i] == '"') {
+				a = i + 1;
+				break;
+			}
+		}
+
+		foreach (i; a.. line.length) {
+			if (line[i] == '"') {
+				b = i;
+				break;
+			}
+		}
+
+		return line[a .. b];
+	}
+
+public:
+	string name, value;
+
+	/* try to read a tag */
+	bool read(ref Reader r) {
+		string line;
+
+		line = r.read();
+		if (line is null || line[0] != '[') {
+			r.unread();
+			return false;
+		}
+
+		name = getName(line);
+		value = getValue(line);
+
+		return true;
+	}
+
+	/* write a tag */
+	void write(std.stdio.File file = stdout) shared {
+		file.writeln("[", name, " \"", value, "\"]");
+	}
+}
+	
 /* 
  * Game
  */
 shared class Game {
-	string [Color.size] name;
-	Result result;
+	struct Info {
+		float time;
+		short score;
+		ubyte depth;
+		bool book;
+	}
+private:
+	/* skip spaces */
+	string skipSpaces(ref string text) {
+		size_t i;
+
+		while (text[i].isSpace()) ++i;
+
+		return text[i .. $];
+	}
+
+	/* skip annotation */
+	string skipAnnotation(ref string text) {
+		size_t i;
+
+		text = skipSpaces(text);
+		if (text[i] == '$') while (!text[i].isSpace()) ++i;
+
+		return text[i .. $];
+	}
+
+	/* skip nested ariation */
+	string skipVariation(ref string text) {
+		size_t i;
+
+		text = skipSpaces(text);
+		if (text[i] == '(') {
+			++i;
+			for (auto counter = 1; counter > 0 && i < text.length; ++i) {
+				counter += (text[i] == '(') - (text[i] == ')');
+			}
+			if (text[i] == ')') ++i;
+		}
+
+		return text[i .. $];
+	}	
+
+	/* skip comment */
+	string skipComment(ref string text) {
+		size_t i;
+
+		text = skipSpaces(text);
+		if (text[i] == '{') {
+			while (++i < text.length && text[i] != '}') {}
+			if (text[i] == '}') ++i;
+		}
+
+		return text[i .. $];
+	}
+
+	/* skip comment */
+	string readComment(ref string text) {
+		size_t i;
+
+		text = skipSpaces(text);
+		if (text[i] == '{') {
+			while (++i < text.length && text[i] != '}') {}
+			if (text[i] == '}') ++i;
+		}
+
+		return text[i .. $];
+	}
+
+	/* read a move */
+	Move getMove(ref string text, Board board) {
+		size_t a, b;
+		Move m;
+
+		text = skipSpaces(text);
+		if (text[a].isNumber()) {
+			while (a + 1 < text.length && text[++a] != '.') {}
+			while (text[a] == '.') ++a;
+		}
+		while (text[a].isSpace()) ++a;
+		for (b = a; b < text.length && !text[b].isSpace; ++b) {}
+		try {
+			m = fromSan(text[a .. b], board);
+		} catch (Exception e) {
+			stderr.writeln(e);
+			stderr.writeln("text: ", text);
+			stderr.writeln("move: ", text[a .. b]);
+			stderr.writeln("rest: ", text[b .. $]);
+			throw e;
+		}
+		text = text[b .. $];
+
+		return m;
+	}
+
+	/* get the ply number */
+	int ply(in Board b) {
+		return 1 + (b.ply + b.plyOffset) / 2;
+	}
+
+public:
+	Tag [] tags;
 	Move [] moves;
-	string line;
+	Info [] infos;
+	Result result;
 
 	/* default constructor */
 	this() {
@@ -29,14 +222,13 @@ shared class Game {
 	}
 
 	/* copy constructor */
-	this(std.stdio.File f) {
-		read(f);
+	this(ref Reader reader) {
+		this.read(reader);
 	}
 
 	/* reset the number of moves to 0 */
 	void clear() {
-		name[Color.white] = "";
-		name[Color.black] = "";
+		tags.length = 0;
 		moves.length = 0;
 		result = Result.none;
 	}
@@ -46,85 +238,97 @@ shared class Game {
 		moves ~= m;
 	}	
 	
-	/* read a line */
-	private bool readLine(std.stdio.File f) {
-		do {
-			line = f.readln();
-		} while (line != null && (line[0] == '%' || line[0] == ';'));
-		return line != null;
-	}		
+	/* append a tag */
+	void push(in string name, in string value) {
+		Tag t;
+		t.name = name; t.value = value;
+		tags ~= t;
+	}	
 
-	/* game result */
-	bool getResult(in string s, out Result r) const {
-		if (s == "1-0") r = Result.whiteWin;
-		else if (s == "0-1") r = Result.blackWin;
-		else if (s == "1/2-1/2") r = Result.draw;
-		else if (s == "*") r = Result.none;
-		else return false;
-		return true;
-	}
-
-	/* read a game from a simple PGN (no FEN field) */
-	void read(std.stdio.File f) {
-		string text;
-		string [] words;
-		size_t n;
+	/* read a game from a simple PGN (no #annotation field) */
+	void read(ref Reader reader) {
+		string line, text;
+		string word; 
 		Move m;
-		Board b = new Board;
+		Board board = new Board;
 		Result r;
+		Tag tag;
 
-		b.set();
+		board.set();
 		clear();
 
 		// read tags
-		do {
-			if (line != null && line.length > 10 && line[0] == '[') {
-				if (line[1..7] == "White ") name[Color.white] = line[7..$].findBetween("\"", "\"");
-				if (line[1..7] == "Black ") name[Color.black] = line[7..$].findBetween("\"", "\"");
-				if (line[1..8] == "Result ") {
-					string s = line[8..$].findBetween("\"", "\"");
-					getResult(s, r); result = r;
-				}
-			}
-		} while (readLine(f) && line[0] == '[');
+		while (tag.read(reader)) {
+			tags ~= tag;
+			if (tag.name == "FEN") board.set(tag.value);
+			else if (tag.name == "Result") toResult(tag.value, result);
+		}
 
-		// read the sequence of moves
-		do {
-			text ~= line.chomp() ~ " ";
-		} while (readLine(f) && line[0] != '[');
-
-		// remove {comments} & (variations)
-		do {
-			n = text.length;
-			text = text.removeBetween("{", "}");
-			text = text.removeBetween("(", ")");
-		} while (n > text.length);
-
-		// read legal moves
-		words = text.split();
-		foreach(w; words) {
-			w.findSkip("."); // remove move number
-			w.strip();	     // remove spaces ?
-			try {
-				if (w == "") {   // skip empty word
-				} else if (getResult(w, r)) { // check result
-					if (r != result) throw new Error("Inconsistant result");
-					break;
-				} else { // read & append moves
-					m = fromSan(w, b);
-					push(m);
-					b.update(m);
-				}
-			} catch(Error e) {
-				stderr.writeln("BAD pgn:", e.msg);
-				stderr.writeln("text: ", text);
-				stderr.writeln("words ", words);
-				stderr.writeln(b);
+		// read the sequence of moves	
+		while (true) {
+			line = reader.read();
+			if (line is null) break;
+			else if (line[0] == '[') {
+				reader.unread();
+				break;
+			} else text ~= line.chomp() ~ " ";
+		}
+	
+		// interpret it
+		while (text.length > 0) {
+			text = skipComment(text);
+			text = skipVariation(text);
+			text = skipAnnotation(text);
+			if (toResult(text, r)) { // check result
+				if (r != result) throw new Exception("Inconsistant result ?");
+				return;
+			} else { // read a move ?
+				m = getMove(text, board);
+				push(m);
+				board.update(m);
 			}
 		}
 	}
-}
 
+	/* write a game */
+	void write(std.stdio.File f = stdout) {
+		Board board = new Board;
+		size_t a, b;
+		string text;
+		bool hasResult;
+
+		// tags
+		foreach (t; tags) {
+			t.write(f);
+			if (t.name == "FEN") board.set(t.value);
+			else if (t.name == "Result" && t.value == result.fromResult!false()) hasResult = true;
+		}
+
+		// game 
+		if (board.player == Color.black) text = format("%d... ", ply(board));
+		foreach (m; moves) {
+			if (board.player == Color.white) text ~= format("%d. ", ply(board));
+			text ~= toSan(m, board) ~ ' ';
+			board.update(m);
+		}
+		if (!hasResult) {
+			result = board.isGameOver;
+			f.writeln("[Result \"", result.fromResult!false(), "\"]");
+		}
+		text ~= result.fromResult!true() ~ " ";
+
+		foreach (i; 0 .. text.length) {
+			if (text[i].isSpace()) {
+				if (i >= a + 80) {
+					if (b == a) b = i;
+					f.writeln(text[a .. b]);
+					a = b + 1;
+				} else b = i;
+			}
+		}
+		if (a < text.length) f.writeln(text[a .. $]);
+	}
+}
 
 /*
  * GameBase a collection of Game.
@@ -135,23 +339,47 @@ shared class GameBase {
 	class Lock {}
 	Lock lock;
 
-	/* read all games */
-	this (in string file) {
-		auto f = std.stdio.File(file, "r");	
-		shared Game g;
+	this() {
 		lock = new shared Lock;
+	}
+
+	/* read all games (not thread safe) */
+	void read (in string fileName, in int minimalLength = 0) {
+		Reader r;
+		shared Game g;
+		ulong n;
+
+		r.open(fileName);
 		do {
-			g = new shared Game(f);
-			if (g.moves.length > 20) games ~= g;
+			try {
+				g = new shared Game(r);
+				n += g.moves.length;
+			} catch (Exception e) {
+				stderr.writeln("bad pgn:", e);
+				stderr.writeln("moves: ", g.moves);
+				g.moves.length = 0;
+			}
+			if (g.moves.length > minimalLength) games ~= g;
 		} while (g.moves.length > 0);
-		writeln("read ", games.length, " games"); stdout.flush();
+		writeln("read ", games.length, " games & ", n, " positions"); stdout.flush();
 		games ~= g;
+	}
+
+	/* write all games */
+	void write(in string fileName) {
+		std.stdio.File f;
+
+		f.open(fileName);
+		foreach (g; games) {
+			g.write(f);
+			f.writeln();
+		}
 	}
 
 	/* reset index to 0 */
 	void clear() {
 		index = 0;
-	}	
+	}
 
 	/* get next game */
 	ref shared(Game) next(in bool loop = false) {
