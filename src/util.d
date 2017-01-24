@@ -2,12 +2,12 @@
  * File util.d
  * Fast implementation on X86_64, portable algorithm for other platform
  * of some bit functions.
- * © 2016 Richard Delorme
+ * © 2016-2017 Richard Delorme
  */
 
 module util;
-import std.stdio, std.array, std.string;
-import core.bitop, core.time, core.thread;
+import std.stdio, std.array, std.string, std.datetime, std.format;
+import core.bitop, core.time, core.thread, core.stdc.stdlib;
 
 version (LDC) import ldc.intrinsics;
 else version (GNU) import gcc.builtins;
@@ -120,27 +120,12 @@ struct Chrono {
 	}
 }
 
-/* remove characters between two strings */
-string findBetween(in string s, in string start, in string end) {
-	size_t i, j;
-
-	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
-	i += start.length; if (i > s.length) i = s.length;
-	for (j = i; j < s.length; ++j) if (s[j .. j + end.length] == end) break;
-
-	return s[i .. j];
+/* return the current date */
+string date() {
+	SysTime t = Clock.currTime();
+	return format("%d.%d.%d", t.year, t.month, t.day);
 }
 
-/* remove characters between two strings. TODO: ("(((blabla)))", "(", ")") remove all */
-string removeBetween(in string s, in string start, in string end) {
-	size_t i, j;
-
-	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
-	for (j = i + start.length; j < s.length; ++j) if (s[j .. j + end.length] == end) break;
-	j += end.length; 
-	if (j > s.length) return s[0 .. i];
-	else return s[0 .. i] ~ s[j .. $];
-}
 
 /*
  * class Event
@@ -217,18 +202,50 @@ class Event {
 	}
 }
 
-/* Unit test */
+
+/*
+ * Miscellaneous utilities
+ */
+
+/* a replacement for assert that is more practical for debugging */
+void claim(bool allegation, in string file = __FILE__, in int line = __LINE__) {
+		if (!allegation) {
+			stderr.writeln(file, ":", line, ": Assertion failed.");
+			abort();
+		}
+}
+
+/* find a substring between two strings */
+string findBetween(in string s, in string start, in string end) {
+	size_t i, j;
+
+	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
+	i += start.length; if (i > s.length) i = s.length;
+	for (j = i; j < s.length; ++j) if (s[j .. j + end.length] == end) break;
+
+	return s[i .. j];
+}
+
+/* check if a File is writeable/readable */
+bool isOK(in std.stdio.File f) @property {
+	return f.isOpen && !f.eof && !f.error;
+}
+
+
+/*
+ * Unit test 
+ */
 unittest {
-	assert(swapBytes(0x1122334455667788) == 0x8877665544332211);
-	assert(hasSingleBit(128));
-	assert(!hasSingleBit(42));
-	assert(firstBit(42) == 1);
+	debug claim(swapBytes(0x1122334455667788) == 0x8877665544332211);
+	debug claim(hasSingleBit(128));
+	debug claim(!hasSingleBit(42));
+	debug claim(firstBit(42) == 1);
 	ulong b = 42;
-	assert(popBit(b) == 1);
-	assert(popBit(b) == 3);
-	assert(popBit(b) == 5);
-	assert(b == 0);
-	assert(countBits(42) == 3);
-	assert(findBetween("bm Qg6 Rh3;", "bm", ";") == " Qg6 Rh3");
+	debug claim(popBit(b) == 1);
+	debug claim(popBit(b) == 3);
+	debug claim(popBit(b) == 5);
+	debug claim(b == 0);
+	debug claim(countBits(42) == 3);
+	debug claim(findBetween("bm Qg6 Rh3;", "bm", ";") == " Qg6 Rh3");
 }
 
