@@ -24,13 +24,14 @@ to be easy to read & understand.
   - quiescence search;
   - late move reduction (LMR);
   - in check extension;
-  - null move reduction;
+  - null move;
   - frontier node pruning & razoring;
+  - delta pruning in quiescence search; 
   - internal iterative deepending (IID);
   - aspiration window;
   - iterative deepening;
   - static exchange evaluation (see) - iterative version;
-
+  
 - algorithms used in evaluation
   - tuned weights with the "Nelder-Mead simplex method", aka amoeba (so the name of the program); 
   - lazy evaluation using material + positional + tempo data; 
@@ -38,7 +39,6 @@ to be easy to read & understand.
   So, the chess knowledge is still very basic and could be improved significantly.
 
 - algorithm tried but discarded:
-  - delta pruning in quiescence search; 
   - enhanced transposition cutoff (ETC); 
   - probcut
   - ...
