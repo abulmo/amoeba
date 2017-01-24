@@ -1,17 +1,18 @@
 /*
  * File board.d
  * Chess board representation, move generation, etc.
- * © 2016 Richard Delorme
+ * © 2016-2017 Richard Delorme
  */
 
 module board;
 
 import move, util;
-import std.stdio, std.ascii, std.format, std.string, std.conv;
+import std.stdio, std.ascii, std.uni, std.format, std.string, std.conv;
 import std.algorithm, std.getopt, std.math, std.random;
+debug import core.stdc.stdlib : abort;
 
 /* limits */
-enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256, historyMax = 32768}
+enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256}
 
 /*
  * Color
@@ -142,7 +143,7 @@ Square firstSquare(in ulong b) {
  * Miscs
  */
 
-/* File mask TODO: en minuscule */
+/* File mask */
 enum File {
 	A = 0x0101010101010101,
 	B = 0x0202020202020202,
@@ -188,7 +189,7 @@ struct Key {
 	static immutable ulong play;
 
 	/* initialize Zobrist keys with pseudo random numbers */
-	shared static this () {
+	shared static this() {
 		Mt19937 r;
 		r.seed(19937);
 		foreach (p; CPiece.wpawn .. CPiece.size)
@@ -480,8 +481,67 @@ private immutable(ubyte [512]) rankInit()  {
 }	
 
 
-/* Game result */
+/* 
+ * Game result 
+ */
 enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, size}
+
+/* to string */
+string fromResult(bool longFormat)(in Result r) {
+	with (Result) {
+		if (longFormat) final switch (r) {
+			case none: return "*";
+			case draw: return "{Draw} 1/2-1/2";
+			case repetitionDraw: return "{Draw by repetition} 1/2-1/2";
+			case fiftyDraw: return "{Draw by fifty-move rule} 1/2-1/2";
+			case insufficientMaterialDraw: return "{Draw by insufficient material} 1/2-1/2";
+			case stalemateDraw: return "{Stalemate} 1/2-1/2";
+			case whiteWin: return "{White wins} 1-0";
+			case blackWin: return "{Black wins} 0-1";
+			case size: return "";
+		} else switch(r) {
+			case none: return "*";
+			case whiteWin: return "1-0";
+			case blackWin: return "0-1";
+			default: return "1/2-1/2";
+		}
+	}
+}
+
+/* game result */
+bool toResult(in string text, out Result r) {
+	size_t a, b;
+	string s;
+
+	while (text[a].isSpace()) ++a;
+	for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
+	s = text[a .. b];
+	if (s == "1-0") r = Result.whiteWin;
+	else if (s == "0-1") r = Result.blackWin;
+	else if (s == "1/2-1/2") r = Result.draw;
+	else if (s == "*") r = Result.none;
+	else return false;
+	return true;
+}
+
+/* game result (duplicated for shared data) */
+version(GNU) {}
+else {
+bool toResult(in string text, out shared Result r) {
+	size_t a, b;
+	string s;
+
+	while (text[a].isSpace()) ++a;
+	for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
+	s = text[a .. b];
+	if (s == "1-0") r = Result.whiteWin;
+	else if (s == "0-1") r = Result.blackWin;
+	else if (s == "1/2-1/2") r = Result.draw;
+	else if (s == "*") r = Result.none;
+	else return false;
+	return true;
+}
+}
 
 /* Kind of move Generation */
 enum Generate {all, capture, quiet}
@@ -768,6 +828,7 @@ public:
 		void error(in string msg) {
 			stderr.writeln("Parsing FEN error: ", msg);
 			stderr.writeln('\"', fen, '\"');
+			debug abort();
 			throw new Error("Bad FEN");
 		}
 
@@ -985,7 +1046,7 @@ public:
 			else if (to == from + 2 && attack!(Piece.rook)(cast (Square) (from - 1), K, O, player)) ++check;
 			break;
 		case Piece.none, Piece.size:
-			assert(0);
+			claim(false);
 		}
 
 		// discovered check
@@ -995,9 +1056,15 @@ public:
 		return check;
 	}		
 
-	/* is a move a Capture or a promotion */
+	/* move is an enpassant capture */
+	bool isEnpassant(in Move m) const {
+		return (stack[ply].enpassant == m.to && toPiece(cpiece[m.from]) == Piece.pawn);
+	}
+	
+
+	/* is a move a Capture or a promotion (enpassant capture are omitted) */
 	bool isTactical(in Move m) const {
-		return (cpiece[m.to] != CPiece.none || m.promotion);
+		return (cpiece[m.to] != CPiece.none || m.promotion /* || isEnpassant(m) */);
 	}
 
 	/* Count the number of a piece */
@@ -1012,8 +1079,8 @@ public:
 
 	/* Play a move on the board */
 	void update(in Move move) {
-		assert(verify());
-		assert(move == 0 || isLegal!true(move));
+		debug claim(verify());
+		debug claim(move == 0 || isLegal!true(move));
 
 		const to = mask[move.to].bit;
 		const enemy = opponent(player);
@@ -1064,12 +1131,12 @@ public:
 		setPinsCheckers(n.checkers, n.pins);
 		++ply;
 
-		assert(verify());
+		debug claim(verify());
 	}
 
 	/* Undo a move on the board */
 	void restore(in Move move) {
-		assert(verify());
+		debug claim(verify());
 
 		const ulong to = mask[move.to].bit;
 		const Color enemy = player;
@@ -1106,8 +1173,8 @@ public:
 			}
 		}
 
-		assert(verify());
-		assert(move == 0 || isLegal!true(move));
+		debug claim(verify());
+		debug claim(move == 0 || isLegal!true(move));
 	}
 
 	/* play a sequence of moves */
@@ -1329,7 +1396,7 @@ public:
 		ulong b;
 
 		bool error(string msg) const {
-			stderr.writeln(this.toString());
+			stderr.writeln(toString());
 			stderr.writeln(msg);
 			return false;
 		}
@@ -1442,12 +1509,12 @@ public:
 
 		bool fail(in Reason r) {		
 			debug if (verbose) {
-				writeln(toString);
-				writeln(move.toString, " (", move, ")");
+				writeln(toString());
+				writeln(move.toPan(), " (", move, ")");
 				writeln("reason ", r);
-				assert(0);
+				claim(false);
 			}
-			return false;	
+			return false;
 		}
 
 		// legal deplacement ?
@@ -1606,13 +1673,13 @@ public:
 
 		if (!div && depth == 1) return moves.length;
 
-		foreach (Move move; moves) {
-			update(move);
+		foreach (Move m; moves) {
+			update(m);
 				if (div && depth == 1) count = 1;
 				else count = perft(depth - 1);
 				total += count;
-				if (div) writefln("%5s %16d", move.toString(), count);
-			restore(move);
+				if (div) writefln("%5s %16d", m.toPan(), count);
+			restore(m);
 		}
 
 		return total;
@@ -1640,8 +1707,8 @@ void perft(string[] arg, Board init) {
 	writeln(board);
 
 	t.start();
-	total = board.perft(depth, div);
-	writefln("perft %2d : %15d leaves in %10.3f s %12.0f leaves/s", depth, total, t.time(), total / t.time());
+	total = depth > 0 ? board.perft(depth, div) : 1;
+	writefln("perft %d: %d leaves in %.3fs (%.0f leaves/s)", depth, total, t.time(), total / t.time());
 }
 
 /* Test the correctness of the move generator */
@@ -1678,8 +1745,8 @@ unittest {
 
 	foreach (test; tests) {
 		write("Test ", test.comments); stdout.flush();
-		b.set(test.fen); assert(b.perft(test.depth) == test.result);
-		b.mirror(); assert(b.perft(test.depth) == test.result);
+		b.set(test.fen); claim(b.perft(test.depth) == test.result);
+		b.mirror(); claim(b.perft(test.depth) == test.result);
 		writeln(" passed"); stdout.flush();
 	}
 }
