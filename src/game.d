@@ -39,6 +39,11 @@ struct Reader {
 	void unread() {
 		skip = true;
 	}
+
+	/* check if the reader is ok to be read */
+	bool isOK() {
+		return skip || file.isOK();
+	}
 }
 	
 
@@ -218,7 +223,8 @@ public:
 	/* copy constructor */
 	this(in shared Game g) {
 		clear();
-		foreach(m; g.moves[0..$]) push(m);
+		tags = g.tags.dup;
+		moves = g.moves.dup;
 	}
 
 	/* copy constructor */
@@ -344,26 +350,45 @@ shared class GameBase {
 	}
 
 	/* read all games (not thread safe) */
-	void read (in string fileName, in int minimalLength = 0) {
+	void read(bool pgn = true)(in string fileName, in int minimalLength = 0) {
 		Reader r;
 		shared Game g;
 		ulong n;
+		string line;
+		static if (!pgn) {
+			string fen;
+			Board b = new Board;	
+		}
 
 		r.open(fileName);
-		do {
+		while (r.isOK) {
+			if ((line = r.read()) == "") continue;
 			try {
-				g = new shared Game(r);
+				g = new shared Game;
+				static if (pgn) {
+					r.unread();
+					g.read(r);
+				} else {
+					b.set(line);
+					fen = b.toFen();
+					g.push("FEN", fen);
+					g.push("SetUp", "1");
+				}		
 				n += g.moves.length;
 			} catch (Exception e) {
-				stderr.writeln("bad pgn:", e);
-				stderr.writeln("moves: ", g.moves);
-				g.moves.length = 0;
+				static if (pgn) {
+					stderr.writeln("bad pgn:", e);
+					stderr.writeln("moves: ", g.moves);
+				} else {
+					stderr.writeln("bad fen:", e);
+				}	
+				break;
 			}
-			if (g.moves.length > minimalLength) games ~= g;
-		} while (g.moves.length > 0);
-		writeln("read ", games.length, " games & ", n, " positions"); stdout.flush();
-		games ~= g;
+			if (g.moves.length >= minimalLength) games ~= g;
+		}
+		writeln("read ", games.length, " games & ", n, " moves"); stdout.flush();
 	}
+
 
 	/* write all games */
 	void write(in string fileName) {
