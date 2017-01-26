@@ -861,8 +861,8 @@ public:
 		if (player == Color.size) error("bad player's turn");
 
 		if (s.length > 5 && isNumeric(s[4])) {
-			plyOffset = 2 * (std.conv.to!int(s[5]) - 1) + player;
 			stack[ply].fifty = std.conv.to!ubyte(s[4]);
+			plyOffset = 2 * (std.conv.to!int(s[5]) - 1) + player;
 		}
 
 		if (s[2] != "-") {
@@ -936,6 +936,40 @@ public:
 		if (stack[ply].castling & Castling.q) s ~= "q";
 		if (stack[ply].enpassant != Square.none) s ~= format(" ep: %s", stack[ply].enpassant);
 		s ~= format(" move %d, fifty %d [K:%s, k:%s]\n", (ply + plyOffset) / 2 + 1, stack[ply].fifty, xKing[Color.white], xKing[Color.black]);
+
+		return s;
+	}
+
+	/* convert to a fen string */
+	string toFen() const {
+		Square x;
+		int f, r, e, l;
+		string p = ".PpNnBbRrQqKk#", c = "wb", n = "012345678", s;
+
+		l = 0;
+		for (r = 7; r >= 0; --r) {
+			e = 0;
+			for (f = 0; f <= 7; ++f) {
+				x = toSquare(f, r);
+				if (cpiece[x] == CPiece.none) ++e;
+				else {
+					if (e) s ~= n[e];
+					s ~= p[cpiece[x]];
+					e = 0;
+				}
+			}
+			if (e) s ~= n[e];
+			if (r > 0) s ~= "/";
+		}
+		s ~= " " ~ c[player] ~ " ";
+		if (stack[ply].castling & Castling.K) s ~= "K";
+		if (stack[ply].castling & Castling.Q) s ~= "Q";
+		if (stack[ply].castling & Castling.k) s ~= "k";
+		if (stack[ply].castling & Castling.q) s ~= "q";
+		if (!stack[ply].castling) s ~= "-";
+		if (stack[ply].enpassant != Square.none) s ~= format(" %s ", stack[ply].enpassant);
+		else s ~= " - ";
+		s ~= format("%d %d", stack[ply].fifty, (ply + plyOffset) / 2 + 1);
 
 		return s;
 	}
