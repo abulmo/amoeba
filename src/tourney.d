@@ -31,6 +31,7 @@ public:
 		name = s;
 		cmd ~= s;
 	}
+
 	/* send a message to an engine */
 	void send(T...)(T args) {
 		pipe.stdin.writeln(args); 
@@ -62,7 +63,8 @@ public:
 		do {
 			l = receive();
 			if (l.skipOver("id name")) name = l.strip();
-		} while (l != "uciok");
+			debug if (l.skipOver("option name Log")) send("setoption name Log value true");
+		} while (l != "uciok");		
 	}
 
 	/* end an engine */
@@ -78,16 +80,16 @@ public:
 	}
 
 	/* set a new position */
-	void position(in shared Game g) {
-		string s = "position startpos";
+	void position(in string fen, in shared Move [] moves) {
+		string s = "position ";
+		if (fen is null) s ~= "startpos";
+		else s ~= "fen " ~ fen;
 
-		if (g.moves.length > 0) {
+		if (moves.length > 0) {
 			s ~= " moves";
-			foreach(m; g.moves[0 .. $]) {
-				s ~= " " ~ m.toPan();
-			}
-			send(s);
+			foreach(m; moves[0 .. $]) s ~= " " ~ m.toPan();
 		}
+		send(s);
 	}
 
 	/* go */
@@ -125,15 +127,17 @@ class Match {
 		Board b = new Board;
 		Result r;
 		Move m;
+		string fen = null;
 		
-		b.set();
+		foreach (t; game.tags) if (t.name == "FEN") fen = t.value;
+		if (fen is null) b.set(); else b.set(fen);
 		b.update(game.moves);
 		
 		engine[Color.white].newGame();
 		engine[Color.black].newGame();
 	
 		while((r = b.isGameOver) == Result.none) {
-			engine[b.player].position(game);
+			engine[b.player].position(fen, game.moves);
 			m = engine[b.player].go(ms);
 			if (m == 0 || !b.isLegal(m)) {
 				if (b.player == Color.white) r = Result.blackWin; else r = Result.whiteWin;
@@ -155,6 +159,10 @@ class Match {
 		game.push("Black", engine[Color.black].name);
 		game.push("White", engine[Color.white].name);
 		game.push("Result", r.fromResult!false());
+		if (fen !is null) {
+			game.push("FEN", fen);
+			game.push("SetUp", "1");
+		}
 
 		if (r == Result.whiteWin) return 2;
 		else if (r == Result.blackWin) return 0;
@@ -195,7 +203,7 @@ private:
 		double N = n[0] + n[1] + n[2] + n[3] + n[4];
 		double m = (n[1] * 0.5 + n[2] + n[3] * 1.5 + n[4] * 2.0) / N;
 		double v = (n[1] * 0.25 + n[2] + n[3] * 2.25 + n[4] * 4.0) / N - (m ^^ 2);
-		return v / (4 * N); // 4 is to rescale the variance as for 1 game
+		return v / (4 * N); // 4 is to rescale the variance as for one game
 	}
 
 	/* 3-nomial variance of the mean score*/
@@ -303,9 +311,13 @@ private:
 
 public:
 	/* constructor */
-	this(in string [] engineName, in string [] openingFile, in string outputFile, in double elo0, in double elo1) {
+	this(in string [] engineName, in string [] openingFile, in string outputFile, in double elo0, in double elo1, in double α, in double β) {
 		openings = new shared GameBase;
-		foreach (o; openingFile) openings.read(o);
+		foreach (o; openingFile) {
+			string ext = o[$ - 3..$].toLower();
+			if (ext == "pgn") openings.read(o);
+			else if (ext == "fen" || ext == "epd") openings.read!false(o);
+		}
 
 		output.open(outputFile, "w");
 		
@@ -351,37 +363,53 @@ void main (string [] args) {
 	bool showVersion, showHelp;
 	string [] engineName, openingFile;
 	string outputFile;
-	double H0 = 0.0, H1 = 5.0;
+	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05;
 	
-	// init
+	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time, "book|b", &openingFile, "output|o", &outputFile, 
-		"games|g", &nGames,	"cpu|n", &nCpu, "elo0|H0", &H0, "elo1|H1", &H1,
+		"games|g", &nGames,	"cpu|n", &nCpu, "elo0|H0", &H0, "elo1|H1", &H1, "alpha|α", &α, "beta|β", &β,
 		"help|h", &showHelp, "version|v", &showVersion);
 
+	if (showVersion) writeln("tourney version 1.1\n© 2017 Richard Delorme");
+
 	if (showHelp) {
-		writeln("tourney --engine|-e <cmd> --engine|-e <cmd>  --time|-t <movetime> --book|-b <pgn file> --games|g <games> --cpu|-n <cpu> --elo0|-H0 <elo> --elo1|-H1 <elo>") ;
-		writeln("\t--engine|-e <cmd>      launch an engine with <cmd>. 2 engines should be loaded");
-		writeln("\t--time|-t <movetime>   time to play a move");
-		writeln("\t--book|-b <pgn file>   opening book");
-		writeln("\t--output|-o <pgn file> opening book");
-		writeln("\t--games|-g <games>     max number of game pairs to play");
-		writeln("\t--cpu|-n <cpu>         number of games to play in parallel");
-		writeln("\t--elo0|-H0 <elo>       H0 hypothesis (default = 0)");
-		writeln("\t--elo1|-H1 <elo>       H1 hypothesis (default = 5)");
-		writeln("\t--help|-h              display this help");
-		writeln("\t--version|-v           show version number");
+		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
+		writeln("\ntourney --engine|-e <cmd> --engine|-e <cmd>  [optional settings]") ;
+		writeln("    --engine|-e <cmd>        launch an engine with <cmd>. 2 engines should be loaded");
+		writeln("    --time|-t <movetime>     time (in seconds) to play a move (default 0.1s)");
+		writeln("    --book|-b <pgn|epd file> opening book");
+		writeln("    --output|-o <pgn file>   save the played games");
+		writeln("    --games|-g <games>       max number of game pairs to play (default 30000)");
+		writeln("    --cpu|-n <cpu>           number of games to play in parallel (default 1)");
+		writeln("    --elo0|-H0 <elo>         H0 hypothesis (default = 0)");
+		writeln("    --elo1|-H1 <elo>         H1 hypothesis (default = 5)");
+		writeln("    --alpha|-α <alpha>       type I error (default = 0.05)");
+		writeln("    --beta|-β <beta>         type II error (default = 0.05)");
+		writeln("    --help|-h                display this help");
+		writeln("    --version|-v             show version number");
+		writeln("\nFor example:\n$ tourney -e amoeba-2.1 -e amoeba-2.0 -g 30000 -b opening.pgn -t 0.1 -n 3 -o game.pgn");
+		writeln("[...]");
+		writeln("Amoeba 2.1-l64p vs Amoeba 2.0.l64p");
+		writeln("results: 3524 games");
+		writeln("wdl:    w: 1058, d: 1545, l: 921");
+		writeln("pair:   0: 112, 0.5: 395, 1: 651, 1.5: 452, 2: 152");
+		writeln("Elo: 13.5 [9.9, 17.1]");
+		writeln("LOS: 99.92 %");
+		writeln("LLR: 2.992 [-2.944, 2.944]");
+		writeln("test accepted");
 	}
 		
-	if (showVersion) writeln("tourney version 1.0\nRichard Delorme © 2017");
 	if (engineName.length != 2) {
-		stderr.writeln("Two engines and only two needed");
+		if (!showVersion && !showHelp) stderr.writeln("Two engines and only two needed");
 		return;
 	}
+
+	// init
 	nCpu = max(0, min(nCpu - 1, totalCPUs - 1));
 	defaultPoolThreads(nCpu);
+	engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
 
-	engines = new EnginePool(engineName, openingFile, outputFile, H0, H1);
-
+	// run the tournament
 	engines.start();
 	engines.loop(nGames, time);
 	engines.end();
