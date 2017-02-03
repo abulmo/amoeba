@@ -9,13 +9,13 @@ import core.atomic, core.thread;
 
 
 /*
- * Vector  (as in Mathematics) 
+ * Vector  (as const Mathematics) 
  */
 struct Vector {
 	double [] data;
 
 	/* construct a vector of size n */
-	this (in size_t n) {
+	this (const size_t n) {
 		data.length = n;
 	}
 
@@ -34,7 +34,7 @@ struct Vector {
 	} 
 
 	/* operator overloading: V + W; V * W; etc. apply the operator to each member data */
-	Vector opBinary(string op)(in Vector V) const {
+	Vector opBinary(string op)(const Vector V) const {
 		debug claim(V.length == length);
 		Vector R = Vector(length);
 		foreach (i; 0 .. length) mixin("R[i] = data[i] "~op~" V[i];");
@@ -42,46 +42,46 @@ struct Vector {
 	}
 
 	/* operator overloading: V + s; V * s; etc. apply the operator to each member data */
-	Vector opBinary(string op)(in double scalar) const {
+	Vector opBinary(string op)(const double scalar) const {
 		Vector R = Vector(length);
 		foreach (i; 0 .. length) mixin("R[i] = data[i] "~op~" scalar;");
 		return R;
 	}
 
 	/* operator overloading: V + s; V * s; etc. apply the operator to each member data */
-	Vector opBinaryRight(string op)(in double scalar) const {
+	Vector opBinaryRight(string op)(const double scalar) const {
 		return opBinary!op(scalar);
 	}
 
 	/* assignment overloading: set all data member to a value */
-	void opAssign(in double scalar) {
+	void opAssign(const double scalar) {
 		foreach (ref x; data) x = scalar;
 	}
 
 	/* assignment overloading: copy a vector */
-	void opAssign(in Vector V) {
+	void opAssign(const Vector V) {
 		data.length = V.length;
 		foreach (i; 0 .. length) data[i] = V[i];
 	}
 
 	/* assignment operator overloading: apply the operator to each member data */
-	void opOpAssign(string op)(in double scalar) {
+	void opOpAssign(string op)(const double scalar) {
 		foreach (i; 0 .. length) mixin("data[i] "~op~"= scalar;");
 	}
 
 	/* assignment operator overloading: apply the operator to each member data */
-	void opOpAssign(string op)(in Vector V) {
+	void opOpAssign(string op)(const Vector V) {
 		debug claim(V.length == length);
 		foreach (i; 0 .. length) mixin("data[i] "~op~"= V[i];");
 	}
 
 	/* indexed access */
-	double opIndex(in size_t i) const {
+	double opIndex(const size_t i) const {
 		debug claim(i < length);
 		return data[i];
 	}
 	/* indexed access */
-	ref double opIndex(in size_t i) {
+	ref double opIndex(const size_t i) {
 		debug claim(i < length);
 		return data[i];
 	}
@@ -99,12 +99,12 @@ struct Vector {
 	}
 
 	/* compute a normalized diff between two vectors */
-	double diff(in Vector v) const {
+	double diff(const Vector v) const {
 		return (this - v).norm;
 	}
 
 	/* set a vector from evaluation weights */
-	void set(in double [] weight, in bool [] isTunable) {		
+	void set(const double [] weight, const bool [] isTunable) {		
 		int j;
 		foreach (i; 0..weight.length) {
 			if (isTunable[i]) data[j++] = weight[i];
@@ -112,7 +112,7 @@ struct Vector {
 	}
 		
 	/* get evaluation weights from a vector */
-	void get(ref double [] weight, in bool [] isTunable) const {
+	void get(ref double [] weight, const bool [] isTunable) const {
 		int j;
 		foreach (i; 0..weight.length) {
 			if (isTunable[i]) weight[i] = data[j++];
@@ -124,14 +124,14 @@ struct Sum {
 	double error = 0.0;
 	ulong n;
 
-	void opOpAssign(string op)(in double x) {
+	void opOpAssign(string op)(const double x) {
 		static if (op == "+") {
 			error += x;
 			++n;
 		} else claim(0);
 	}
 
-	void opOpAssign(string op)(in ref Sum v) shared {
+	void opOpAssign(string op)(const ref Sum v) shared {
 		static if (op == "+") {
 			atomicOp!"+="(this.error, v.error);
 			atomicOp!"+="(this.n, v.n);
@@ -140,12 +140,12 @@ struct Sum {
 }
 
 /* compute the sigmoid */
-double sigmoid(in double score) {
+double sigmoid(const double score) {
 	return 1.0 / (1.0 + 10.0 ^^ (-0.0025 * score));
 }
 
 /* translate a game result into [-1, 0, 1] for the player to move */
-double result(in Color c, in shared Game game) {
+double result(const Color c, const shared Game game) {
 	if (c == Color.white && game.result == Result.whiteWin) return 1;
 	else if (c == Color.black && game.result == Result.blackWin) return 1;
 	else if (game.result == Result.draw) return 0.5;
@@ -153,7 +153,7 @@ double result(in Color c, in shared Game game) {
 }
 
 /* compute the error for a single thread */
-void getPartialError(in int id, shared GameBase games, in double [] weights, in double K, shared Sum *sum) {
+void getPartialError(const int id, shared GameBase games, const double [] weights, const double K, shared Sum *sum) {
 	double r, s;
 	shared Game game;
 	Sum part;
@@ -200,14 +200,14 @@ class Amoeba {
 	int nCpu;
 	
 	/* constructor */
-	this (ref const double [] w, in string gameFile, in int cpu) {
+	this (ref const double [] w, string gameFile, const int cpu) {
 		isTunable.length = w.length;
 		setTunable(1, isTunable.length);
 		weights = w.dup;
 		games = new shared GameBase;
 		nCpu = cpu;
 		games.read(gameFile, 20);
-		writeln("Amoeba running ", nCpu, " tasks in parallel");
+		writeln("Amoeba running ", nCpu, " tasks const parallel");
 	}
 
 	/* count the number of Tunable weights */
@@ -218,17 +218,17 @@ class Amoeba {
 	}
 
 	/* set a range of tunable weights */
-	void setTunable(in size_t from, in size_t to) {
+	void setTunable(const size_t from, const size_t to) {
 		foreach (ref b; isTunable[from .. to]) b = true;
 	}
 
 	/* set a weight tunable */
-	void setTunable(in size_t i) {
+	void setTunable(const size_t i) {
 		isTunable[i] = true;
 	}
 
 	/* unset a range of tunable weights */
-	void clearTunable(in size_t from, in size_t to) {
+	void clearTunable(const size_t from, const size_t to) {
 		foreach (ref b; isTunable[from .. to]) b = false;
 	}
 
@@ -365,7 +365,7 @@ class Amoeba {
 	}
 
 	/* optimize K using the golden section search. */
-	void optimizeK(in double tolerance, in int maxIter) {
+	void optimizeK(const double tolerance, const int maxIter) {
 		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
 		const double gr = (sqrt(5.0) - 1.0) / 2.0;
@@ -402,7 +402,7 @@ class Amoeba {
 	}
 
 	/* optimize 1 parameter using the golden section search. */
-	void optimizeWeight(in size_t i, const double tolerance, const int maxIter, in double [2] limits = [-2.0, 2.0]) {
+	void optimizeWeight(const size_t i, const double tolerance, const int maxIter, const double [2] limits = [-2.0, 2.0]) {
 		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
 		const double gr = (sqrt(5.0) - 1.0) / 2.0; // Golden ration
@@ -441,7 +441,7 @@ class Amoeba {
 	}
 
 	/* init the Simplex */
-	void init(in double volume) {
+	void init(const double volume) {
 		const size_t size = countTunable() + 1;
 		const double a = volume / size * sqrt(2.0);
 		const double δi = a * (sqrt(size - 1.0) + size - 1.0);
@@ -463,7 +463,7 @@ class Amoeba {
 	}
 
 	/* Amoeba or simplex optimization algorithm. */
-	void tune(in double tolerance, in int maxIter, in bool adaptative = false) 	{
+	void tune(const double tolerance, const int maxIter, const bool adaptative = false) 	{
 		Vector C, Pr, Pe, Pc;
 		double size, flat, υ, yBest = +double.max, yr, ye, yc;
 		static immutable int minIter = 10;
@@ -511,7 +511,7 @@ class Amoeba {
 				}
 			} else if (y[secondWorst] <= yr) {
 				stage = Stage.contraction;
-				if (yr < y[worst]) Pc = C + γ * (Pr - C); // outside contraction
+				if (yr < y[worst]) Pc = C + γ * (Pr - C); // refside contraction
 				else Pc = C - γ * (Pr - C); // inside contraction
 				yc = getError(Pc);
 				if (yc < yr) {
@@ -534,7 +534,7 @@ class Amoeba {
 }
 
 /* tune a range of evaluation weights */
-void tune(Amoeba amoeba, in int [] openingRange, in int [] endgameRange, in double size, in double tolerance, in int maxIter, in bool adaptative) {
+void tune(Amoeba amoeba, const int [] openingRange, const int [] endgameRange, const double size, const double tolerance, const int maxIter, const bool adaptative) {
 	amoeba.clearTunable(0, amoeba.isTunable.length);
 	amoeba.setTunable(openingRange[0], openingRange[1]);
 	amoeba.setTunable(endgameRange[0], endgameRange[1]);
@@ -544,7 +544,7 @@ void tune(Amoeba amoeba, in int [] openingRange, in int [] endgameRange, in doub
 
 
 /* tune by piece type */
-void tuneByPiece(Amoeba amoeba, in double volume, in double tolerance, in int maxIter, in bool adaptative) {
+void tuneByPiece(Amoeba amoeba, const double volume, const double tolerance, const int maxIter, const bool adaptative) {
 	with (Piece) {
 		Piece [] pieces = [
 			// Opening
@@ -620,7 +620,7 @@ void main(string [] args) {
 		writeln("\t--optimizeK|-k        compute the optimal value for k");
 		writeln("\t--optimize|-o         compute the set of weights using golden ratio");
 		writeln("\t--bench|-b            bench");
-		writeln("\t--stats|-S            compute some statistics about current weights");
+		writeln("\t--stats|-S            compute some statistics abref current weights");
 		writeln("\t--help|-h             Display this help");
 		writeln("(*) the range/scratch/concept/piece/help arguments are exclusive");
 		writeln("");
