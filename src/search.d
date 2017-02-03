@@ -37,17 +37,17 @@ struct Entry {
 	}
 
 	/* refresh the aging date */
-	void refresh(in int date) {
+	void refresh(const int date) {
 		info = cast (ushort) ((info & 511) | (date << 9));
 	}
 
 	/* score (with Mate score rescaled) */
-	int score(in int ply) const {
+	int score(const int ply) const {
 		return value < Score.low ? value + ply : (value > Score.high ? value - ply : value);
 	}
 
 	/* update an existing entry */
-	void update(in int d, in int ply, in int date, in Bound b, in int v, in Move m) {
+	void update(const int d, const int ply, const int date, const Bound b, const int v, const Move m) {
 		if (d >= depth) {
 			info = cast (ushort) (b | (d << 2) | (date << 9));
 			value = cast (short) (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
@@ -58,7 +58,7 @@ struct Entry {
 	}
 
 	/* set a new entry */
-	void set(in Key k, in int d, in int ply, in int date, in Bound b, in int v, in Move m) {
+	void set(const Key k, const int d, const int ply, const int date, const Bound b, const int v, const Move m) {
 		code = k.code;
 		info = cast (ushort) (b | (d << 2) | (date << 9));
 		value = cast (short) (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
@@ -102,7 +102,7 @@ final class TranspositionTable {
 	}
 
 	/* clear the table */
-	void clear(in bool cleaner = true) {
+	void clear(const bool cleaner = true) {
 		if (cleaner || date == 127) {
 			date = 0;
 			foreach (ref h; entry) {
@@ -114,7 +114,7 @@ final class TranspositionTable {
 	}
 
 	/* look for an entry matching the zobrist key */
-	bool probe(in Key k, out Entry found) {
+	bool probe(const Key k, ref Entry found) {
 		const size_t i = cast (size_t) (k.code & mask);
 		foreach (ref h; entry[i .. i + bucketSize]) {
 			if (h.code == k.code) {
@@ -127,7 +127,7 @@ final class TranspositionTable {
 	}
 
 	/* store search data */
-	void store(in Key k, in int depth, in int ply, in Bound b, in int v, in Move m) {
+	void store(const Key k, const int depth, const int ply, const Bound b, const int v, const Move m) {
 		const size_t i = cast (size_t) (k.code & mask);
 		Entry *w = &entry[i];
 		foreach (ref h; entry[i .. i + bucketSize]) {
@@ -140,13 +140,13 @@ final class TranspositionTable {
 	}
 
 	/* speed up further access */
-	void prefetch(in Key k) {
+	void prefetch(const Key k) {
 		const size_t i = cast (size_t) (k.code & mask);
 		util.prefetch(&entry[i]);
 	}
 
 	/* choose between lower & exact bound */
-	Bound bound(in int v, in int β) const {
+	Bound bound(const int v, const int β) const {
 		return v >= β ? Bound.lower : Bound.exact;
 	}
 }
@@ -208,12 +208,12 @@ private:
 		size_t multiPv;
 
 		/* save current search infos (except pv / score) */
-		void update(in ulong n, in int d, in double t) {
+		void update(const ulong n, const int d, const double t) {
 			nNodes = n; depth = d; time = t;
 		}
 
 		/* save current search infos (pv + score) */
-		void store(in int iPv, int s, ref Line p) {
+		void store(const int iPv, int s, ref Line p) {
 			Move m = p.move[0];
 			foreach (i; iPv + 1 .. multiPv) {
 				if (m == pv[i].move[0]) {					
@@ -228,7 +228,7 @@ private:
 		}
 
 		/* sort the pvs & score */
-		void sort(in int iPv) {
+		void sort(const int iPv) {
 			for (int j = iPv - 1; j >= 0 && score[j + 1] > score[j]; --j) {
 				swap(score[j + 1], score[j]);
 				pv[j].swap(pv[j + 1]);
@@ -236,7 +236,7 @@ private:
 		}
 		
 		/* clear results */
-		void clear(in size_t n) {
+		void clear(const size_t n) {
 			nNodes = 0; depth = 0; time = 0.0;
 			multiPv = n;
 			foreach (i; 0 .. multiPv) {
@@ -246,7 +246,7 @@ private:
 		}	
 
 		/* write the search result so far using UCI protocol */
-		void writeUCI(in int iPv, std.stdio.File f=stdout) const {
+		void writeUCI(const int iPv, std.stdio.File f=stdout) const {
 			auto t = 1000 * time;
 			auto speed = nNodes / time;
 			foreach (i; 0 .. multiPv) {
@@ -284,12 +284,12 @@ public:
 
 private:
 	/* (simple) logging */
-	void log(T...)  (in string fmt, T args) {
+	void log(T...)  (string fmt, T args) {
 		if (logFile.isOpen) logFile.writefln(fmt, args);
 	}
 
 	/* check if enough time is available */
-	bool checkTime(in double timeMax) const {
+	bool checkTime(const double timeMax) const {
 		return option.isPondering || time < timeMax;
 	}
 
@@ -328,7 +328,7 @@ private:
 	}
 
 	/* update heuristics */
-	void heuristicsUpdate(in Move m, in int d) {
+	void heuristicsUpdate(const Move m, const int d) {
 		if (m != killer[ply][0]) {
 			killer[ply][1] = killer[ply][0];
 			killer[ply][0] = m;
@@ -340,7 +340,7 @@ private:
 	}
 
 	/* update a move */
-	void update(in Move m) {
+	void update(const Move m) {
 		board.update(m);
 		tt.prefetch(board.key);
 		if (m) eval.update(board, m);
@@ -350,7 +350,7 @@ private:
 	}
 
 	/* restore a move */
-	void restore(in Move m) {
+	void restore(const Move m) {
 		--ply;
 		line.pop();
 		board.restore(m);
@@ -424,7 +424,7 @@ private:
 	}
 
 	/* alpha-beta search (PVS/negascout variant) */
-	int αβ(int α, int β, in int d, in bool doPrune = true) {
+	int αβ(int α, int β, const int d, const bool doPrune = true) {
 		const bool isPv = (α + 1 < β);
 		int s, bs, e, r, iQuiet;
 		Moves moves = void;
@@ -548,7 +548,7 @@ private:
 	}
 
 	/* alpha-beta search at root level */
-	void αβRoot(int α, in int β, in int d) {
+	void αβRoot(int α, const int β, const int d) {
 		const αOld = α;
 		int s, bs = -Score.mate, e, r, iQuiet;
 		Result draw;
@@ -603,7 +603,7 @@ private:
 	}
 
 	/* aspiration window */
-	void aspiration(in int α, in int β, in int d) {
+	void aspiration(const int α, const int β, const int d) {
 		int λ, υ, up = +10, down = -10;
 
 		if (d <= 4) {
@@ -625,7 +625,7 @@ private:
 	}
 
 	/* multiPv : search n best moves */
-	void multiPv(in size_t n, in int d) {
+	void multiPv(const size_t n, const int d) {
 		int β = Score.mate - 1;
 
 		// search the ith best move
@@ -661,14 +661,14 @@ private:
 	}
 
 	/* continue iterative deepening */
-	bool persist(in int d) const {
+	bool persist(const int d) const {
 		return checkTime(0.618034 * option.termination.time.max) 
 		    && !stop && d <= option.termination.depth.max
 		    && info.score[option.multiPv - 1] <= Score.mate - d && info.score[0] >= d - Score.mate;
 	}
 
 	/* search limited on some moves */
-	void keepMoves(in ref Moves moves) {
+	void keepMoves(const ref Moves moves) {
 		rootMoves = moves;
 	}
 
@@ -690,7 +690,7 @@ public:
 	}
 
 	/* resize the tt */
-	void resize(in size_t size) {
+	void resize(const size_t size) {
 		tt.resize(size * 31 / 32);
 		eval.resize(size / 32);
 	}
@@ -712,7 +712,7 @@ public:
 	}
 
 	/* go search */
-	void go(in ref Termination t, in ref Moves moves, in bool easy = false, in int doMultiPv = 1, bool ponder = false) {
+	void go(const ref Termination t, const ref Moves moves, const bool easy = false, const int doMultiPv = 1, bool ponder = false) {
 		timer.start();
 			option.termination = t;
 			option.isPondering = ponder;
@@ -720,7 +720,7 @@ public:
 			option.easy = easy;
 			setup();
 			if (moves.length > 0) keepMoves(moves);
-			if (tt.date == 1) log("search> date in hashtable cleared");
+			if (tt.date == 1) log("search> date const hashtable cleared");
 			log("search> go: %s", option);
 			log("search> moves: %s", rootMoves);
 			if (rootMoves.length == 0) {
@@ -736,7 +736,7 @@ public:
 	}
 
 	/* go search without aspiration window nor iterating deepening */
-	void go(in int d) {
+	void go(const int d) {
 		timer.start();
 			setup();
 			option.termination.time.max = option.termination.time.extra = double.infinity;
@@ -779,7 +779,7 @@ public:
  */
 
 /* Look if epd best moves match the best move found. */
-bool epdMatch(string epd, Board b, in Move found) {
+bool epdMatch(string epd, Board b, const Move found) {
 	write("found ", found.toSan(b));
 	string [] solutions = epd.findBetween("bm", ";").split();
 	if (solutions.length > 0) {
@@ -803,7 +803,7 @@ bool epdMatch(string epd, Board b, in Move found) {
 }
 
 /* Test the search using an epd file */
-void epdTest(string [] args, in bool checkSolution = true) {
+int epdTest(string [] args, const bool checkSolution = true) {
 	double t = double.infinity, T = 0, D = 0;
 	int d = Limits.plyMax, n, nGoods;
 	size_t ttSize = 256;
@@ -812,9 +812,17 @@ void epdTest(string [] args, in bool checkSolution = true) {
 	bool verbose, help;
 	Termination termination;
 	Moves moves;
-
-	getopt(args, "movetime|t", &t, "depth|d", &d, "hash", &ttSize, "verbose|v", &verbose, "file|f", &epdFile, "help|h", &help);
-	if (help) writeln("epd [--movetime <time>] [--depth <depth>] [--verbose <bool>] --file <epd file> [--help]");
+	
+	getopt(args, "movetime|t", &t, "depth|d", &d, "hash|H", &ttSize, "verbose|v", &verbose, "file|f", &epdFile, "help|h", &help);
+	if (help) {
+		writeln("epd [--movetime|-t <time>] [--depth|-d <depth>] [--hash|-H] [--verbose|-v <bool>] --file <epd file> [--help]");
+		writefln("\t--movetime|-t <time>  maximum time per move in seconds (default: %s)", t);
+		writefln("\t--depth|-d <depth>    maximum depth time per move in seconds (default: %s)", d);
+		writefln("\t--hash|-H <size>      hash size in Mb (default %s MB)", ttSize);
+		writefln("\t--verbose|-v <bool>   more verbose output (default: %s)", verbose);
+		writeln("\t--file|-f <epd file>  EPD file to test");
+		writeln("\t--help|-h             display this help\n");
+	}
 	
 	termination.time.max = termination.time.extra = t;
 	termination.depth.max = min(d, Limits.plyMax);
@@ -825,10 +833,11 @@ void epdTest(string [] args, in bool checkSolution = true) {
 	s.option.verbose = verbose;
 	Board b = new Board;
 	writefln("*** epdTest  depth: %d, time: %.3fs, memory: %d MB ***", d, t, ttSize);
-
+	if (verbose) s.showSetting();
+		
 	auto f = std.stdio.File(epdFile);
 
-	foreach(line; f.byLine()) {
+	foreach (line; f.byLine()) {
 		string epd = to!string(line).chomp();
 		if (epd == "") continue;
 		b.set(epd);
@@ -848,7 +857,15 @@ void epdTest(string [] args, in bool checkSolution = true) {
 
 	if (checkSolution) writef("epd: %d founds / %d problems ", nGoods, n);
 	else writef("bench: %d positions ", n);
-	writefln(" %d nodes in %.3fs : %.0f nps, depth = %.2f", N, T, N / T, D / n);
+	writefln(" %d nodes const %.3fs : %.0f nps, depth = %.2f", N, T, N / T, D / n);
 	stdout.flush();
+
+	return (100 * nGoods) / n;
+}
+
+/* Unittest */
+unittest {
+	writeln("");
+	claim(epdTest(["epd", "-t", "1", "-f", "bk.epd"]) >= 40);
 }
 
