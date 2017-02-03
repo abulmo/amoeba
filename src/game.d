@@ -35,7 +35,7 @@ struct Reader {
 		return line;
 	}
 
-	/* unread a line (keep it in the buffer) */
+	/* unread a line (keep it const the buffer) */
 	void unread() {
 		skip = true;
 	}
@@ -53,7 +53,7 @@ struct Reader {
 struct Tag {
 private:
 	/* get the name of the tag  */
-	static string getName(in string line) {
+	static string getName(string line) {
 		foreach (i; 1 .. line.length) {
 			if (isSpace(line[i])) return line[1 .. i];
 		}
@@ -62,7 +62,7 @@ private:
 	}
 
 	/* get the value of the tag */
-	static string getValue(in string line) {
+	static string getValue(string line) {
 		size_t a = 1, b = line.length - 1;		
 		foreach (i; 1 .. line.length) {
 			if (line[i] == '"') {
@@ -205,7 +205,7 @@ private:
 	}
 
 	/* get the ply number */
-	int ply(in Board b) {
+	int ply(const Board b) {
 		return 1 + (b.ply + b.plyOffset) / 2;
 	}
 
@@ -221,7 +221,7 @@ public:
 	}
 
 	/* copy constructor */
-	this(in shared Game g) {
+	this(const shared Game g) {
 		clear();
 		tags = g.tags.dup;
 		moves = g.moves.dup;
@@ -240,12 +240,12 @@ public:
 	}
 
 	/* append a move */
-	void push(in Move m) {
+	void push(const Move m) {
 		moves ~= m;
 	}	
 	
 	/* append a tag */
-	void push(in string name, in string value) {
+	void push(string name, string value) {
 		Tag t;
 		t.name = name; t.value = value;
 		tags ~= t;
@@ -349,8 +349,17 @@ shared class GameBase {
 		lock = new shared Lock;
 	}
 
+	size_t length() @property {
+		return games.length;
+	}
+
+	void opOpAssign(string op)(shared Game game) {
+		if (op == "~") games ~= game;
+		else claim(false);
+	}
+
 	/* read all games (not thread safe) */
-	void read(bool pgn = true)(in string fileName, in int minimalLength = 0) {
+	void read(bool pgn = true)(string fileName, const int minimalLength = 0) {
 		Reader r;
 		shared Game g;
 		ulong n;
@@ -390,8 +399,8 @@ shared class GameBase {
 	}
 
 
-	/* write all games */
-	void write(in string fileName) {
+	/* write all games (not thread safe) */
+	void write(string fileName) {
 		std.stdio.File f;
 
 		f.open(fileName);
@@ -407,7 +416,7 @@ shared class GameBase {
 	}
 
 	/* get next game */
-	ref shared(Game) next(in bool loop = false) {
+	ref shared(Game) next(const bool loop = false) {
 		synchronized (lock) {
 			if (index < games.length) atomicOp!"+="(index, 1);
 			else if (loop) index = 1;
