@@ -17,13 +17,13 @@ enum size = 24 * 64 * 64 * 2;
 shared byte [size] result;
 
 /* compute the index to the result table from the square coordinates */
-int getIndex(in Square p, in Square wk, in Square bk, in Color c) {
+int getIndex(const Square p, const Square wk, const Square bk, const Color c) {
 	int x = 4 * rank(p) + file(p) - 4;
 	return (x << 13) | (wk << 7) | (bk << 1) | c;
 }
 
 /* from an index, compute the position */
-void getSquares(in int i, ref Square p, ref Square wk, ref Square bk, ref Color player) {
+void getSquares(const int i, ref Square p, ref Square wk, ref Square bk, ref Color player) {
 	int x = i >> 13;
 	p  = toSquare(x & 3, x / 4 + 1);
 	wk = cast (Square) ((i >> 7) & 63);
@@ -32,7 +32,7 @@ void getSquares(in int i, ref Square p, ref Square wk, ref Square bk, ref Color 
 }
 
 /* bit x */
-ulong bit(in int x) {
+ulong bit(const int x) {
 	return 1UL << x;
 }
 
@@ -111,7 +111,7 @@ void init () {
 }
 
 /* evaluate a kpk position, rescale the score according to win/draw/loss */
-Value rescale(in Board b, in Value score) {
+Value rescale(const Board b, const Value score) {
 	const ulong P = b.piece[Piece.pawn];
 	const ulong V = b.piece[Piece.none];
 	
@@ -147,7 +147,7 @@ unittest {
 
 	init();
 
-	write("Testing kpk..."); stdout.flush();
+	write("\nTesting kpk..."); stdout.flush();
 	foreach (r; result) count[r]++;
 	claim(count[win] == 111282);
 	claim(count[draw] == 54394);
