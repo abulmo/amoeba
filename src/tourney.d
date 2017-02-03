@@ -27,7 +27,7 @@ public:
 	}
 
 	/* constructor */
-	this(in string s) {
+	this(string s) {
 		name = s;
 		cmd ~= s;
 	}
@@ -80,7 +80,7 @@ public:
 	}
 
 	/* set a new position */
-	void position(in string fen, in shared Move [] moves) {
+	void position(string fen, const shared Move [] moves) {
 		string s = "position ";
 		if (fen is null) s ~= "startpos";
 		else s ~= "fen " ~ fen;
@@ -93,7 +93,7 @@ public:
 	}
 
 	/* go */
-	Move go(in int ms) {
+	Move go(const int ms) {
 		string l;
 		send("go movetime ", ms);
 		while(true) {
@@ -116,14 +116,14 @@ class Match {
 	int ms;
 	
 	/* create a new match setting */
-	this (Engine [Color.size] e, in shared Game opening, in double t) {
+	this (Engine [Color.size] e, const shared Game opening, const double t) {
 		engine = e;
 		game = new shared Game(opening);
 		ms = cast (int) (1000 * t + 0.5);
 	}
 
 	/* run a match */
-	int run(in int round) {
+	int run(const int round) {
 		Board b = new Board;
 		Result r;
 		Move m;
@@ -170,6 +170,8 @@ class Match {
 	}
 }
 
+enum Var { none, trinomial, pentanomial, all };
+
 /*
  * Sequential Probability Ratio test (SPRT)
  *  - SPRT is computed directly from the wdl scores, not the elo
@@ -187,14 +189,14 @@ struct SPRT {
 
 private:
 	/* elo from winning probability */
-	static double elo(in double p) {
+	static double elo(const double p) {
 		if (p >= 1.0) return 1000;
 		else if (p <= 0.0) return -1000;
 		return -400.0 * log10(1.0 / p - 1.0);
 	}
 
 	/* winning probability from elo */
-	static double proba(in double e) pure {
+	static double proba(const double e) pure {
 		return 1.0 / (1.0 + pow(10.0, -e / 400.0));
 	}
 
@@ -216,7 +218,7 @@ private:
 
 public:
 	/* constructor */
-	this(in double elo0, in double elo1, in double α = 0.05, in double β = 0.05) {
+	this(const double elo0, const double elo1, const double α, const double β) {
 		Φ =  normalDistribution(1 - α * 0.5);
 		score0 = proba(elo0);
 		score1 = proba(elo1);
@@ -225,13 +227,13 @@ public:
 	}
 
 	/* (re)set engine names */
-	void setEngineNames(in string [2] engine) {
+	void setEngineNames(const string [2] engine) {
 		name[0] = engine[0];
 		name[1] = engine[1];
 	}		
 
 	/* record a new game */
-	void record(in int [2] result) {
+	void record(const int [2] result) {
 		int s;
 
 		foreach(r; result) {
@@ -262,28 +264,50 @@ public:
 	}
 
 	/* stop if llr condition are met */
-	bool stop() const {
+	bool stop(Var V = Var.pentanomial) const {
 		ulong n = w + d + l;
 		double score = (w + 0.5 * d) / n;
-		double v = var5(), σ = sqrt(v);
-		double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
-		double los = normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ);
+		bool end = true;
 
-		writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
-		writefln("LOS: %.2f %%", 100.0 * los);
-		writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
+		if (V & Var.pentanomial) {
+			double v = var5(), σ = sqrt(v);
+			double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
+			double los = normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ);
 
-		if (llr < llr0) writeln("test rejected");
-		else if (llr > llr1) writeln("test accepted");
-		writeln();
+			writeln("Using variance of the pentanomial distribution of game pairs:");
+			writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
+			writefln("LOS: %.2f %%", 100.0 * los);
+			writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
+
+			if (llr < llr0) writeln("test rejected");
+			else if (llr > llr1) writeln("test accepted");
+			else end = false;
+			writeln();
+		}
 		
-		return (llr < llr0 || llr > llr1); 
+		if (V & Var.trinomial) {
+			double v = var3(), σ = sqrt(v);
+			double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
+			double los = normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ);
+
+			writeln("Using variance of the trinomial distribution of single games:");
+			writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
+			writefln("LOS: %.2f %%", 100.0 * los);
+			writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
+
+			if (llr < llr0) writeln("test rejected");
+			else if (llr > llr1) writeln("test accepted");
+			else end = false;
+			writeln();
+		}
+
+		return end; 
 	}
 }
 
 
 /*
- * A pool of engines running in parallel...
+ * A pool of engines running const parallel...
  */
 class EnginePool {
 private:
@@ -293,7 +317,7 @@ private:
 	SPRT sprt;
 
 	/* play a pair of matches, each engine playing white & black */
-	bool match(in int i, in shared Game opening, in double time) {
+	bool match(const int i, const shared Game opening, const double time, const Var v) {
 		auto w = taskPool.workerIndex;
 		auto m1 = new Match([player[w], opponent[w]], opening, time);
 		auto m2 = new Match([opponent[w], player[w]], opening, time);
@@ -305,23 +329,23 @@ private:
 				m2.game.write(output); output.writeln();
 			}
 			sprt.record([s1, 2 - s2]);
-			return sprt.stop();
+			return sprt.stop(v);
 		}
 	}
 
 public:
 	/* constructor */
-	this(in string [] engineName, in string [] openingFile, in string outputFile, in double elo0, in double elo1, in double α, in double β) {
+	this(const string [] engineName, const string [] openingFile, string outputFile, const double elo0, const double elo1, const double α, const double β) {
 		openings = new shared GameBase;
 		foreach (o; openingFile) {
 			string ext = o[$ - 3..$].toLower();
 			if (ext == "pgn") openings.read(o);
 			else if (ext == "fen" || ext == "epd") openings.read!false(o);
 		}
-
-		output.open(outputFile, "w");
+		if (openings.length == 0) openings ~= new shared Game;
+		if (outputFile) output.open(outputFile, "w");
 		
-		sprt = SPRT(elo0, elo1);
+		sprt = SPRT(elo0, elo1, α, β);
 
 		foreach(i; 0 .. taskPool.size + 1) {
 			player ~= new Engine(engineName[0]);
@@ -333,6 +357,7 @@ public:
 	void start() {
 		foreach (ref e; player) e.start();
 		foreach (ref e; opponent) e.start();
+
 		sprt.setEngineNames([player[0].name, opponent[0].name]);
 	}
 
@@ -342,11 +367,11 @@ public:
 		foreach (ref e; opponent) e.end();
 	}
 
-	/* loop in parallel thru the games */
-	void loop(in int nGames, in double time) {
+	/* loop const parallel thru the games */
+	void loop(const int nGames, const double time, const Var v) {
 		bool done = false;
 		foreach (i; taskPool.parallel(iota(nGames))) {
-			if (!done) done = (match(i, openings.next(true), time) && i >= 99);
+			if (!done) done = (match(i, openings.next(true), time, v) && i >= 99);
 		}
 		taskPool.finish(true);
 	}
@@ -356,18 +381,20 @@ public:
 /*
  * main: play a tournament between two UCI chess engines
  */
-void main (string [] args) {
+void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
 	int nGames = 30000, nCpu = 1;
 	bool showVersion, showHelp;
 	string [] engineName, openingFile;
-	string outputFile;
+	string outputFile, var;
 	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05;
+	Var v = Var.all;
 	
 	// read arguments
-	getopt(args, "engine|e", &engineName, "time|t", &time, "book|b", &openingFile, "output|o", &outputFile, 
-		"games|g", &nGames,	"cpu|n", &nCpu, "elo0|H0", &H0, "elo1|H1", &H1, "alpha|α", &α, "beta|β", &β,
+	getopt(args, "engine|e", &engineName, "time|t", &time,
+		"book|b", &openingFile, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
+		"elo0|H0", &H0, "elo1|H1", &H1, "alpha|α", &α, "beta|β", &β, "variance|V", &var,
 		"help|h", &showHelp, "version|v", &showVersion);
 
 	if (showVersion) writeln("tourney version 1.1\n© 2017 Richard Delorme");
@@ -385,6 +412,7 @@ void main (string [] args) {
 		writeln("    --elo1|-H1 <elo>         H1 hypothesis (default = 5)");
 		writeln("    --alpha|-α <alpha>       type I error (default = 0.05)");
 		writeln("    --beta|-β <beta>         type II error (default = 0.05)");
+		writeln("    --variance|-V <type>     3nomial|5nomial|all (default=all) ");
 		writeln("    --help|-h                display this help");
 		writeln("    --version|-v             show version number");
 		writeln("\nFor example:\n$ tourney -e amoeba-2.1 -e amoeba-2.0 -g 30000 -b opening.pgn -t 0.1 -n 3 -o game.pgn");
@@ -404,6 +432,11 @@ void main (string [] args) {
 		return;
 	}
 
+	var = var.toLower;
+	if (var == "pentanomial" || var == "5-nomial" || var == "5nomial") v = Var.pentanomial;
+	else if (var == "trinomial" || var == "3-nomial" || var == "3nomial") v = Var.trinomial;
+	else if (var == "all") v = Var.all;
+
 	// init
 	nCpu = max(0, min(nCpu - 1, totalCPUs - 1));
 	defaultPoolThreads(nCpu);
@@ -411,7 +444,7 @@ void main (string [] args) {
 
 	// run the tournament
 	engines.start();
-	engines.loop(nGames, time);
+	engines.loop(nGames, time, v);
 	engines.end();
 }
 
