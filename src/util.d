@@ -29,7 +29,7 @@ else {
 }
 
 /* Check if a single bit is set */
-bool hasSingleBit(in ulong b) {
+bool hasSingleBit(const ulong b) {
 	return (b & (b - 1)) == 0;
 }
 
@@ -47,10 +47,10 @@ int popBit(ref ulong b) {
 /* Count the number of bits */
 version (withPopCount) {
 	version (GNU) alias countBits = __builtin_popcountll;
-	else version (LDC) int countBits(in ulong b) {return cast (int) llvm_ctpop(b);}
+	else version (LDC) int countBits(const ulong b) {return cast (int) llvm_ctpop(b);}
 	else alias countBits = _popcnt;
 } else {
-	int countBits(in ulong b) {
+	int countBits(const ulong b) {
 		ulong c = b
 			- ((b >> 1) & 0x7777777777777777)
 			- ((b >> 2) & 0x3333333333333333)
@@ -62,7 +62,7 @@ version (withPopCount) {
 }
 
 /* Print bits */
-void writeBitboard(in ulong b, File f = stdout) {
+void writeBitboard(const ulong b, File f = stdout) {
 	int i, j, x;
 	const char[2] bit = ".X";
 	const char[8] file = "12345678";
@@ -84,7 +84,7 @@ void writeBitboard(in ulong b, File f = stdout) {
  * prefetch
  */
 void prefetch(void *v) {
-	version (DMD) {}
+	version (DMD) prefetch!(0, 3)(v);
 	version (GNU) __builtin_prefetch(v);
 	version (LDC) llvm_prefetch(v, 0, 3, 1);
 }
@@ -111,7 +111,7 @@ struct Chrono {
 		tick = TickDuration.currSystemTick() - tick;
 	}
 
-	/* return spent time in secs with decimals */
+	/* return spent time const secs with decimals */
 	double time() const {
 		double t;
 		if (on) t = (TickDuration.currSystemTick() - tick).hnsecs;
@@ -130,7 +130,7 @@ string date() {
 /*
  * class Event
  */
-class Event {
+shared class Event {
 	private:
 	string [] ring;
 	size_t first, last;
@@ -139,29 +139,29 @@ class Event {
 
 	public:
 	/* constructor */
-	this () shared {
+	this () {
 		ring.length = 4;
 		lock = new shared Lock;
 	}
 
 	/* ring is empty */
-	shared bool empty() const @property {
+	bool empty() const @property {
 		return first == last;
 	}
 
 	/* ring is full */
-	shared bool full() const @property {
-		return first == (last + 1) % ring.length;
+	bool full() const @property {
+		return first == (last + 1)  % ring.length;
 	}
 
 	/* push a new event to the ring */
-	shared void push(string s) {
+	void push(string s) {
 		synchronized (lock) {
 			if (full) {
-				auto l = ring.length;
+				const l = ring.length, δ = l - 1;
 				ring.length = 2 * l;
-				foreach (i ; 0 .. first) ring[i + l] = ring[i];
-				last = last + l;
+				foreach (i ; 0 .. first) ring[i + δ] = ring[i];
+				last = first + δ;
 			}
 			ring[last] = s;
 			last = (last + 1) % ring.length;
@@ -169,7 +169,7 @@ class Event {
 	}
 
 	/* peek an event */
-	shared string peek() {
+	string peek() {
 		synchronized (lock) {
 			string s;
 			if (!empty) {
@@ -182,23 +182,23 @@ class Event {
 	}
 
 	/* wait for an event */
-	shared string wait() {
+	string wait() {
 		while (empty) Thread.sleep(1.msecs);
 		return peek();
 	}
 
 	/* has event s */
-	shared bool has(string s) {
+	bool has(string s) {
 		return !empty && ring[first] == s;
 	}
 
 	/* loop */
-	shared void loop() {
+	void loop() {
 		string line;
 		do {
 			line = readln().chomp();
 			push(line);
-		} while (stdin.isOpen && line != "quit");
+		} while (line != "quit" && stdin.isOpen);
 	}
 }
 
@@ -208,7 +208,7 @@ class Event {
  */
 
 /* a replacement for assert that is more practical for debugging */
-void claim(bool allegation, in string file = __FILE__, in int line = __LINE__) {
+void claim(bool allegation, string file = __FILE__, const int line = __LINE__) {
 		if (!allegation) {
 			stderr.writeln(file, ":", line, ": Assertion failed.");
 			abort();
@@ -216,7 +216,7 @@ void claim(bool allegation, in string file = __FILE__, in int line = __LINE__) {
 }
 
 /* find a substring between two strings */
-string findBetween(in string s, in string start, in string end) {
+string findBetween(string s, string start, string end) {
 	size_t i, j;
 
 	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
@@ -227,7 +227,7 @@ string findBetween(in string s, in string start, in string end) {
 }
 
 /* check if a File is writeable/readable */
-bool isOK(in std.stdio.File f) @property {
+bool isOK(const std.stdio.File f) @property {
 	return f.isOpen && !f.eof && !f.error;
 }
 
@@ -236,16 +236,20 @@ bool isOK(in std.stdio.File f) @property {
  * Unit test 
  */
 unittest {
-	debug claim(swapBytes(0x1122334455667788) == 0x8877665544332211);
-	debug claim(hasSingleBit(128));
-	debug claim(!hasSingleBit(42));
-	debug claim(firstBit(42) == 1);
+	claim(stdout.isOK);
+	writeBitboard(0x55aa55aa55aa55aa);
+	write("Testing utilities..."); stdout.flush();
+	claim(swapBytes(0x1122334455667788) == 0x8877665544332211);
+	claim(hasSingleBit(128));
+	claim(!hasSingleBit(42));
+	claim(firstBit(42) == 1);
 	ulong b = 42;
-	debug claim(popBit(b) == 1);
-	debug claim(popBit(b) == 3);
-	debug claim(popBit(b) == 5);
-	debug claim(b == 0);
-	debug claim(countBits(42) == 3);
-	debug claim(findBetween("bm Qg6 Rh3;", "bm", ";") == " Qg6 Rh3");
+	claim(popBit(b) == 1);
+	claim(popBit(b) == 3);
+	claim(popBit(b) == 5);
+	claim(b == 0);
+	claim(countBits(42) == 3);
+	claim(findBetween("bm Qg6 Rh3;", "bm", ";") == " Qg6 Rh3");
+	writeln("ok");
 }
 
