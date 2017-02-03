@@ -20,12 +20,12 @@ enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, mo
 enum Color : ubyte {white, black, size, none}
 
 // Opponent color
-Color opponent(in Color c) {
+Color opponent(const Color c) {
 	return cast (Color) !c;
 }
 
 // Conversion from a char
-Color toColor(in char c) {
+Color toColor(const char c) {
 	auto i = indexOf("wb", c);
 	if (i == -1) i = Color.size;
 	return cast (Color) i;
@@ -38,13 +38,13 @@ Color toColor(in char c) {
 enum Piece : ubyte {none, pawn, knight, bishop, rook, queen, king, size}
 
 /* Convert to a piece from a char */
-Piece toPiece(in char c) {
+Piece toPiece(const char c) {
 	auto i = indexOf(".pnbrqk", c, CaseSensitive.no);
 	if (i == -1) i = 0;
 	return cast (Piece) i;
 }
 
-char toChar(in Piece p) {
+char toChar(const Piece p) {
 	return ".PNBRQK?"[p];
 }
 
@@ -55,19 +55,19 @@ char toChar(in Piece p) {
 enum CPiece : ubyte {none, wpawn, bpawn, wknight, bknight, wbishop, bbishop, wrook, brook, wqueen, bqueen, wking, bking, size}
 
 /* Conversion from piece & color */
-CPiece toCPiece(in Piece p, in Color c) {
+CPiece toCPiece(const Piece p, const Color c) {
 	return cast (CPiece) (2 * p + c - 1);
 }
 
 /* Conversion from a char */
-CPiece toCPiece(in char c) {
+CPiece toCPiece(const char c) {
 	auto i = indexOf(".PpNnBbRrQqKk", c);
 	if (i == -1) i = 0;
 	return cast (CPiece) i;
 }
 
 /* Get the color of a colored piece */
-Color toColor(in CPiece p) {
+Color toColor(const CPiece p) {
 	static immutable Color[CPiece.size] c= [Color.none,
 		Color.white, Color.black, Color.white, Color.black, Color.white, Color.black,
 		Color.white, Color.black, Color.white, Color.black, Color.white, Color.black];
@@ -75,12 +75,12 @@ Color toColor(in CPiece p) {
 }
 
 /* Get the piece of a colored piece */
-Piece toPiece(in CPiece p) {
+Piece toPiece(const CPiece p) {
 	return cast (Piece) ((p + 1) / 2);
 }
 
 /* Get the opponent colored piece */
-CPiece opponent(in CPiece p) {
+CPiece opponent(const CPiece p) {
 	return cast (CPiece) (((p - 1) ^ 1) + 1);
 }
 
@@ -102,28 +102,28 @@ enum Square : ubyte {
 }
 
 /* Mirror square for black */
-Square forward(in Square x, in Color c) {
+Square forward(const Square x, const Color c) {
 	return cast (Square) (x ^ (56 * c));
 }
 
 /* Get rank */
-int rank(in Square x) {
+int rank(const Square x) {
 	return x >> 3;
 }
 
 /* Get file */
-int file(in Square x) {
+int file(const Square x) {
 	return x & 7;
 }
 
 /* Square from file & rank */
-Square toSquare(in int f, in int r) {
+Square toSquare(const int f, const int r) {
 	if (0 <= f && f < 8 && 0 <= r && r < 8) return cast (Square) ((r << 3) + f);
 	else return Square.none;
 }
 
 /* Square from string */
-Square toSquare(in string s) {
+Square toSquare(string s) {
 	if(s.length > 1) return toSquare(s[0] - 'a', s[1] - '1');
 	else return Square.none;
 
@@ -135,7 +135,7 @@ Square popSquare(ref ulong b) {
 }
 
 /* Square from bitboard */
-Square firstSquare(in ulong b) {
+Square firstSquare(const ulong b) {
 	return cast (Square) firstBit(b);
 }
 
@@ -170,7 +170,7 @@ enum Rank {
 /* Castling */
 enum Castling : ubyte {none = 0, K = 1, Q = 2, k = 4, q = 8, size = 16}
 
-int toCastling(in char c) {
+int toCastling(const char c) {
 	auto i = indexOf("KQkq", c);
 	if (i == -1) return 0;
 	else return 1 << i;
@@ -201,7 +201,7 @@ struct Key {
 	}
 
 	/* set the key from a position */
-	void set(in Board board) {
+	void set(const Board board) {
 		const Board.Stack *s = &board.stack[board.ply];
 		code = color[board.player];
 		foreach (Square x; Square.a1 .. Square.size) code ^= square[board[x]][x];
@@ -210,7 +210,7 @@ struct Key {
 	}
 
 	/* update the key with a move */
-	void update(in Board board, Move move) {
+	void update(const Board board, Move move) {
 		Square x = Square.none;
 		const Color player = board.player;
 		const Color enemy = opponent(player);
@@ -247,7 +247,7 @@ struct PawnKey {
 	ulong code;
 
 	/* set the key from a position */
-	void set(in Board board) {
+	void set(const Board board) {
 		ulong b = board.piece[Piece.pawn] | board.piece[Piece.king];
 		while (b) {
 			auto x = popSquare(b);
@@ -256,7 +256,7 @@ struct PawnKey {
 	}
 
 	/* update the key with a move */
-	void update(in Board board, Move move) {
+	void update(const Board board, Move move) {
 		Square x = Square.none;
 		const Color player = board.player;
 		const CPiece p = board[move.from];
@@ -403,7 +403,7 @@ private immutable(Mask[Square.size]) maskInit() {
 private immutable(bool [Limits.moveSize][Piece.size]) legalInit() {
 	bool [Limits.moveSize][Piece.size] legal;
 
-	void set(in Piece p, in int f, in int t) { legal[p][(t << 6) | f] = true;}
+	void set(const Piece p, const int f, const int t) { legal[p][(t << 6) | f] = true;}
 	
 	foreach (x; Square.a2 .. Square.a8) {
 		set(Piece.pawn, x, x + 8);
@@ -487,7 +487,7 @@ private immutable(ubyte [512]) rankInit()  {
 enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, size}
 
 /* to string */
-string fromResult(bool longFormat)(in Result r) {
+string fromResult(bool longFormat)(const Result r) {
 	with (Result) {
 		if (longFormat) final switch (r) {
 			case none: return "*";
@@ -509,7 +509,7 @@ string fromResult(bool longFormat)(in Result r) {
 }
 
 /* game result */
-bool toResult(in string text, out Result r) {
+bool toResult(string text, ref Result r) {
 	size_t a, b;
 	string s;
 
@@ -525,9 +525,7 @@ bool toResult(in string text, out Result r) {
 }
 
 /* game result (duplicated for shared data) */
-version(GNU) {}
-else {
-bool toResult(in string text, out shared Result r) {
+bool toResult(string text, ref shared Result r) {
 	size_t a, b;
 	string s;
 
@@ -540,7 +538,6 @@ bool toResult(in string text, out shared Result r) {
 	else if (s == "*") r = Result.none;
 	else return false;
 	return true;
-}
 }
 
 /* Kind of move Generation */
@@ -596,14 +593,14 @@ private:
 	}
 
 	/* slider attack function for the file, diagonal & antidiagonal directions */
-	static ulong attack(in ulong occupancy, in Square x, in ulong m)  {
+	static ulong attack(const ulong occupancy, const Square x, const ulong m)  {
 		const ulong o = occupancy & m;
 		const ulong r = swapBytes(o);
 		return ((o - mask[x].bit) ^ swapBytes(r - mask[x ^ 56].bit)) & m;
 	}
 
 	/* slider attack function along a rank */
-	static ulong rankAttack(in ulong occupancy, in Square x) {
+	static ulong rankAttack(const ulong occupancy, const Square x) {
 		const int f = x & 7;
 		const int r = x & 56;
 		const ulong o = (occupancy >> r) & 126;
@@ -611,22 +608,22 @@ private:
 	}
 
 	/* Slider attack along a file */
-	static ulong fileAttack(in ulong occupancy, in Square x) {
+	static ulong fileAttack(const ulong occupancy, const Square x) {
 		return attack(occupancy, x, mask[x].file);
 	}
 
 	/* Slider attack along a diagonal */
-	static ulong diagonalAttack(in ulong occupancy, in Square x) {
+	static ulong diagonalAttack(const ulong occupancy, const Square x) {
 		return attack(occupancy, x, mask[x].diagonal);
 	}
 
 	/* Slider attack along an antidiagonal */
-	static ulong antidiagonalAttack(in ulong occupancy, in Square x) {
+	static ulong antidiagonalAttack(const ulong occupancy, const Square x) {
 		return attack(occupancy, x, mask[x].antidiagonal);
 	}
 
 	/* Compute pins & checkers */
-	void setPinsCheckers(out ulong checkers, out ulong pins) {
+	void setPinsCheckers(ref ulong checkers, ref ulong pins) {
 		const Color enemy = opponent(player);
 		const Square k = xKing[player];
 		const ulong bq = (piece[Piece.bishop] + piece[Piece.queen]) & color[enemy];
@@ -667,7 +664,7 @@ private:
 	}
 
 	/* Deplace a piece on the board */
-	void deplace(in int from, in int to, in Piece p) {
+	void deplace(const int from, const int to, const Piece p) {
 		const ulong M = mask[from].bit | mask[to].bit;
 		piece[Piece.none] ^= M;
 		piece[p] ^= M;
@@ -677,7 +674,7 @@ private:
 	}
 
 	/* check if a square is attacked */
-	bool isSquareAttacked(in Square x, in Color player) const {
+	bool isSquareAttacked(const Square x, const Color player) const {
 		const ulong occupancy = ~piece[Piece.none];
 		const ulong P = color[player];
 
@@ -689,7 +686,7 @@ private:
 	}
 
 	/* generate all moves from a square */
-	static void generateMoves(ref Moves moves, ulong attack, in Square from) {
+	static void generateMoves(ref Moves moves, ulong attack, const Square from) {
 		Square to;
 
 		while (attack) {
@@ -699,7 +696,7 @@ private:
 	}
 
 	/* generate promotion */
-	static void generatePromotions(ref Moves moves, ulong attack, in int dir) {
+	static void generatePromotions(ref Moves moves, ulong attack, const int dir) {
 		while (attack) {
 			Square to = popSquare(attack);
 			Square from = cast (Square) (to - dir);
@@ -708,7 +705,7 @@ private:
 	}
 
 	/* generate pawn moves */
-	static void generatePawnMoves (ref Moves moves, ulong attack, in int dir) {
+	static void generatePawnMoves (ref Moves moves, ulong attack, const int dir) {
 		while (attack) {
 			Square to = popSquare(attack);
 			Square from = cast (Square) (to - dir);
@@ -717,7 +714,7 @@ private:
 	}
 
 	/* generate all white pawn moves */
-	void generateWhitePawnMoves(Generate type) (ref Moves moves, in ulong attacker, in ulong enemies, in ulong empties) const {
+	void generateWhitePawnMoves(Generate type) (ref Moves moves, const ulong attacker, const ulong enemies, const ulong empties) const {
 		ulong attack;
 
 		static if (type != Generate.quiet) {
@@ -743,7 +740,7 @@ private:
 	}
 
 	/* generate all black pawn moves */
-	void generateBlackPawnMoves(Generate type) (ref Moves moves, in ulong attacker, in ulong enemies, in ulong empties) const {
+	void generateBlackPawnMoves(Generate type) (ref Moves moves, const ulong attacker, const ulong enemies, const ulong empties) const {
 		ulong attack;
 
 		static if (type != Generate.quiet) {
@@ -769,7 +766,7 @@ private:
 
 public:
 	/* Coverage by a piece*/
-	static ulong coverage(Piece p)(in Square x, in ulong occupancy = 0, in Color c = Color.white) {
+	static ulong coverage(Piece p)(const Square x, const ulong occupancy = 0, const Color c = Color.white) {
 		static if (p == Piece.pawn) return mask[x].pawnAttack[c]; // piece advance excluded!
 		else static if (p == Piece.knight) return mask[x].knight;
 		else static if (p == Piece.bishop) return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x);
@@ -779,7 +776,7 @@ public:
 	}
 
 	/* Attack (coverage on some target) */
-	static ulong attack(Piece p)(in Square x, in ulong target, in ulong occupancy = 0, in Color c = Color.white) {
+	static ulong attack(Piece p)(const Square x, const ulong target, const ulong occupancy = 0, const Color c = Color.white) {
 		return coverage!p(x, occupancy, c) & target;
 	}
 
@@ -819,13 +816,13 @@ public:
 	}
 
 	/* set the board from a FEN string */
-	Board set(in string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") {
+	Board set(string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") {
 		Square x;
 		CPiece p;
 		int r = 7, f;
 		string [] s = fen.split();
 
-		void error(in string msg) {
+		void error(string msg) {
 			stderr.writeln("Parsing FEN error: ", msg);
 			stderr.writeln('\"', fen, '\"');
 			debug abort();
@@ -898,7 +895,7 @@ public:
 	}
 
 	/* copy constructor */
-	this (in Board b) {
+	this (const Board b) {
 		foreach (p; Piece.none .. Piece.size) piece[p] = b.piece[p];
 		foreach (c; Color.white .. Color.size) color[c] = b.color[c];
 		foreach (x; Square.a1 .. Square.size) cpiece[x] = b.cpiece[x];
@@ -975,16 +972,16 @@ public:
 	}
 
 	/* chess  board content */
-	ref CPiece opIndex(in Square x) {
+	ref CPiece opIndex(const Square x) {
 		 return cpiece[x];
 	}
 
 	/* chess  board content */
-	CPiece opIndex(in Square x) const {
+	CPiece opIndex(const Square x) const {
 		 return cpiece[x];
 	}
 
-	/* king is in check */
+	/* king is const check */
 	bool inCheck() const @property {
 		 return stack[ply].checkers > 0;
 	}
@@ -1047,7 +1044,7 @@ public:
 	}
 
 	/* verify if a move gives check */
-	int giveCheck(in Move m) const {
+	int giveCheck(const Move m) const {
 		const Color enemy = opponent(player);
 		const ulong K = piece[Piece.king] & color[enemy];
 		const Square from = m.from, to = m.to, k = xKing[enemy];
@@ -1091,28 +1088,28 @@ public:
 	}		
 
 	/* move is an enpassant capture */
-	bool isEnpassant(in Move m) const {
+	bool isEnpassant(const Move m) const {
 		return (stack[ply].enpassant == m.to && toPiece(cpiece[m.from]) == Piece.pawn);
 	}
 	
 
 	/* is a move a Capture or a promotion (enpassant capture are omitted) */
-	bool isTactical(in Move m) const {
+	bool isTactical(const Move m) const {
 		return (cpiece[m.to] != CPiece.none || m.promotion /* || isEnpassant(m) */);
 	}
 
 	/* Count the number of a piece */
-	int count(in Piece p, in Color c) const {
+	int count(const Piece p, const Color c) const {
 		return countBits(piece[p] & color[c]);
 	}
 
 	/* Count the number of a colored piece */
-	int count(in CPiece p) const {
+	int count(const CPiece p) const {
 		return count(toPiece(p), toColor(p));
 	}
 
 	/* Play a move on the board */
-	void update(in Move move) {
+	void update(const Move move) {
 		debug claim(verify());
 		debug claim(move == 0 || isLegal!true(move));
 
@@ -1169,7 +1166,7 @@ public:
 	}
 
 	/* Undo a move on the board */
-	void restore(in Move move) {
+	void restore(const Move move) {
 		debug claim(verify());
 
 		const ulong to = mask[move.to].bit;
@@ -1212,17 +1209,17 @@ public:
 	}
 
 	/* play a sequence of moves */
-	void update(in Move [] moves) {
+	void update(const Move [] moves) {
 		foreach (m; moves) update(m);
 	}
 
 	/* play a sequence of moves */
-	void update(in shared Move [] moves) {
+	void update(const shared Move [] moves) {
 		foreach (m; moves) update(m);
 	}
 
 	/* restore a sequence of moves */
-	void restore(in Move [] moves) {
+	void restore(const Move [] moves) {
 		foreach_reverse (m; moves) restore(m);
 	}
 
@@ -1532,7 +1529,7 @@ public:
 	}
 
 	/* is a move legal */
-	bool isLegal(bool verbose = false) (in Move move) {
+	bool isLegal(bool verbose = false) (const Move move) {
 		const ulong occupancy = ~piece[Piece.none];
 		Piece p = toPiece(cpiece[move.from]);
 		Color enemy = opponent(player);
@@ -1541,7 +1538,7 @@ public:
 		enum Reason { none, wrongDeplacement, wrongColor, obstacle, blockedSquare, wrongCapture, missingPromotion, wrongPromotion, 
 			wrongVictim, illegalCastling, kingInCheck, illegalMissed }
 
-		bool fail(in Reason r) {		
+		bool fail(const Reason r) {		
 			debug if (verbose) {
 				writeln(toString());
 				writeln(move.toPan(), " (", move, ")");
@@ -1592,7 +1589,7 @@ public:
 				|| isSquareAttacked(cast (Square) (k - 2), enemy))) return fail(Reason.illegalCastling);
 		}
 
-		// king in check after the move ?
+		// king const check after the move ?
 		piece[Piece.none] ^= mask[move.to].bit | mask[move.from].bit;
 		if (victim) {
 			color[enemy] ^= mask[move.to].bit;
@@ -1627,7 +1624,7 @@ public:
 	}
 
 	/* get next Attacker to compute SEE */
-	Piece nextVictim(ref ulong [Color.size] board, in Square to, in Color c, ref Piece [Color.size] last) const {
+	Piece nextVictim(ref ulong [Color.size] board, const Square to, const Color c, ref Piece [Color.size] last) const {
 		const Color enemy = opponent(c);
 		const ulong P = board[c];
 		const ulong occupancy = board[c] | board[enemy];
@@ -1635,7 +1632,7 @@ public:
 		static immutable Piece [Piece.size] next = [Piece.none, Piece.pawn, Piece.knight, Piece.bishop, Piece.rook, Piece.bishop, Piece.size];
 
 		// remove the last attacker and return the victim
-		Piece victim(in Piece p) {
+		Piece victim(const Piece p) {
 			board[c] ^= (attacker & -attacker);
 			last[c] = p;
 			return p;
@@ -1671,7 +1668,7 @@ public:
 	}
 
 	/* SEE of a move (before playing it) */
-	int see(in Move move) const {
+	int see(const Move move) const {
 		const Square to = move.to;
 		const Color enemy = opponent(player);
 		const Piece p = toPiece(cpiece[move.from]);
@@ -1699,7 +1696,7 @@ public:
 	}
 
 	/* run perft: test correctness & speed of the move generator */
-	ulong perft (in int depth, in bool div = false) {
+	ulong perft (const int depth, const bool div = false) {
 		Moves moves = void;
 		ulong count, total;
 
@@ -1742,7 +1739,7 @@ void perft(string[] arg, Board init) {
 
 	t.start();
 	total = depth > 0 ? board.perft(depth, div) : 1;
-	writefln("perft %d: %d leaves in %.3fs (%.0f leaves/s)", depth, total, t.time(), total / t.time());
+	writefln("perft %d: %d leaves const %.3fs (%.0f leaves/s)", depth, total, t.time(), total / t.time());
 }
 
 /* Test the correctness of the move generator */
@@ -1754,6 +1751,7 @@ unittest {
 		ulong result;
 	}
 
+	writeln("Testing the board generator");
 	TestBoard [] tests = [
 		{"1. Initial position ", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 6, 119060324},
 		{"2.", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 5, 193690690},
@@ -1764,10 +1762,10 @@ unittest {
 		{"7.", "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1", 6, 824064},
 		{"8. Enpassant capture gives check", "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1", 6, 1440467},
 		{"9. Short castling gives check", "5k2/8/8/8/8/8/8/4K2R w K - 0 1", 6, 661072},
-		{"10. Long castling gives checs", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 6, 803711},
+		{"10. Long castling gives check", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 6, 803711},
 		{"11. Castling", "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1", 4, 1274206},
 		{"12. Castling prevented", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1", 4, 1720476},
-		{"13. Promote out of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 6, 3821001},
+		{"13. Promote ref of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 6, 3821001},
 		{"14. Discovered check", "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1", 5, 1004658},
 		{"15. Promotion gives check", "4k3/1P6/8/8/8/8/K7/8 w - - 0 1", 6, 217342},
 		{"16. Underpromotion gives check", "8/P1k5/K7/8/8/8/8/8 w - - 0 1", 6, 92683},
@@ -1779,8 +1777,11 @@ unittest {
 
 	foreach (test; tests) {
 		write("Test ", test.comments); stdout.flush();
-		b.set(test.fen); claim(b.perft(test.depth) == test.result);
-		b.mirror(); claim(b.perft(test.depth) == test.result);
+		b.set(test.fen); 
+		claim(b.toFen()[0 .. test.fen.length] == test.fen);
+		claim(b.perft(test.depth) == test.result);
+		b.mirror();
+		claim(b.perft(test.depth) == test.result);
 		writeln(" passed"); stdout.flush();
 	}
 }
