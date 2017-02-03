@@ -15,22 +15,22 @@ import std.stdio, std.ascii, std.format, std.string, std.algorithm;
 alias Move = ushort;
 
 /* from square */
-Square from(in Move move) @property {
+Square from(const Move move) @property {
 	return cast (Square) (move & 63);
 }
 
 /* to square */
-Square to(in Move move) @property {
+Square to(const Move move) @property {
 	return cast (Square) ((move >> 6) & 63);
 }
 
 /* Promoted piece (if any) */
-Piece promotion(in Move move) @property {
+Piece promotion(const Move move) @property {
 	return cast (Piece) ((move >> 12) & 7);
 }
 
 /* convert a move into a string using Pure Algebraic Coordinate Notation (PAN) */
-string toPan(in Move move) {
+string toPan(const Move move) {
 	if (move.promotion) return format("%s%s%c", move.from, move.to, toChar(move.promotion));
 	else if (move) return format("%s%s", move.from, move.to);
 	else return "0000";
@@ -47,7 +47,7 @@ Move fromPan(string s) {
 }
 
 /* convert a string using standard algebraic notation (SAN) into a move */
-Move fromSan(in string s, Board b) {
+Move fromSan(string s, Board b) {
 	int r, f;
 	Square from, to;
 	Piece promotion = Piece.none;
@@ -56,9 +56,9 @@ Move fromSan(in string s, Board b) {
 	int i;
 	f = r = Square.none;
 
-	bool hasChar(in int j, char c) { return j < s.length && s[j] == c; }
-	bool hasAlpha(in int j) { return j < s.length && isAlpha(s[j]); }
-	bool hasDigit(in int j) { return j < s.length && isDigit(s[j]); }
+	bool hasChar(const int j, char c) { return j < s.length && s[j] == c; }
+	bool hasAlpha(const int j) { return j < s.length && isAlpha(s[j]); }
+	bool hasDigit(const int j) { return j < s.length && isDigit(s[j]); }
 
 	if (s.length >= 5 && (s[0..5] == "O-O-O" || s[0..5] == "0-0-0")) {
 		from = b.xKing[b.player];
@@ -112,7 +112,7 @@ Move fromSan(in string s, Board b) {
 }
 
 /* convert a move to a string using Standard Algebraic Notation (SAN) */
-string toSan(in Move move, Board board) {
+string toSan(const Move move, Board board) {
 	string f = "abcdefgh", r = "12345678", s;
 	int nSameFile, nSameTo;
 	Moves moves = void;
@@ -158,7 +158,7 @@ struct History {
 	ushort [Square.size][CPiece.size] h;
 	enum max = 32768;
 	
-	void update(in Board board, in Move m, in uint δ) {
+	void update(const Board board, const Move m, const uint δ) {
 		debug claim (board.isTactical(m) == false);
 
 		if ((h[board[m.from]][m.to] += δ) > max) {
@@ -176,7 +176,7 @@ struct History {
 		}
 	}
 
-	short value(in CPiece p, in Square to) const {
+	short value(const CPiece p, const Square to) const {
 		return cast (short) (h[p][to] - max);
 	}
 }	
@@ -188,7 +188,7 @@ struct MoveItem {
 	Move move;
 	int value;
 
-	this(in Move m, in int v) {
+	this(const Move m, const int v) {
 		move = m;
 		value = v;
 	}
@@ -228,7 +228,7 @@ private:
 	}
 	
 	/* insert a move & its value at the current index position */
-	void insert(in Move m, in short v) {
+	void insert(const Move m, const short v) {
 		item[n] = MoveItem(m, v);
 		swap(item[index], item[n]);
 		n++;
@@ -302,7 +302,7 @@ public:
 	}
 
 	/* init (from main search) */
-	void init(in bool inCheck, const ref Move [2] ttm, const ref Move[Color.size] k, const ref Move r, const ref History h) {
+	void init(const bool inCheck, const ref Move [2] ttm, const ref Move[Color.size] k, const ref Move r, const ref History h) {
 		ttMove = ttm;
 		killer = k;
 		refutation = r;
@@ -313,7 +313,7 @@ public:
 	}
 	
 	/* init (from quiescence search) */
-	void init(in bool inCheck, const ref Move [2] ttm) {
+	void init(const bool inCheck, const ref Move [2] ttm) {
 		ttMove = ttm;
 		killer[] = 0;
 		refutation = 0;
@@ -413,7 +413,7 @@ public:
 	}
 
 	/* insert a move as ith move */
-	void setBest(in Move m, in size_t i = 0) {
+	void setBest(const Move m, const size_t i = 0) {
 		foreach (j; 0 .. n) if (m == item[j].move) {
 			auto tmp = item[j];
 			foreach_reverse (k; i .. j) item[k + 1] = item[k];
@@ -442,18 +442,18 @@ public:
 	}
 
 	/* append a move built from origin & destination squares */
-	ref Moves push(in Square from, in Square to) {
+	ref Moves push(const Square from, const Square to) {
 		item[n++].move = (from | to << 6);
 		return this;
 	}
 
 	/* append a move */
-	void push(in Move m, in short v = 0) {
+	void push(const Move m, const short v = 0) {
 		item[n++] = MoveItem(m, v);
 	}
 
 	/* append promotions from origin & destination squares */
-	ref Moves pushPromotions(in Square from, in Square to) {
+	ref Moves pushPromotions(const Square from, const Square to) {
 		item[n++].move = (from | to << 6 | Piece.queen << 12);
 		item[n++].move = (from | to << 6 | Piece.knight << 12);
 		item[n++].move = (from | to << 6 | Piece.rook << 12);
@@ -494,12 +494,12 @@ public:
 	}
 
 	/* is the first move ? */
-	bool isFirst(in Move m) const {
+	bool isFirst(const Move m) const {
 		return m == item[0].move;
 	}
 
 	/* opIndex */
-	ref const(Move) opIndex(in size_t i) const {
+	ref const(Move) opIndex(const size_t i) const {
 		 return item[i].move;
 	}	
 }
@@ -525,7 +525,7 @@ struct Line {
 	}
 
 	/* append a move */
-	ref Line push(in Move m) {
+	ref Line push(const Move m) {
 		debug claim(n < plyMax);
 		move[n++] = m;
 		return this;
@@ -545,7 +545,7 @@ struct Line {
 	}
 
 	/* set */
-	ref Line set(in Move m, const ref Line l) {
+	ref Line set(const Move m, const ref Line l) {
 		return clear().push(m).push(l);
 	}
 
