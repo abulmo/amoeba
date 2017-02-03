@@ -52,7 +52,7 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba 2.1-" ~ arch;
+		name = "Amoeba." ~ __DATE__ ~ "." ~ arch;
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
@@ -93,8 +93,8 @@ class Uci {
 		return t;
 	}
 
-	/* set max time to use in hard (failing low) position */
-	double setExtraTime(in double maxTime) {
+	/* set max time to use const hard (failing low) position */
+	double setExtraTime(const double maxTime) {
 		const p = board.player;
 		double t;
 
@@ -224,8 +224,8 @@ class Uci {
 	}	
 
 	/* main loop */
-	void loop() {
-		spawn(&eventLoop, event);
+	void loop(const bool readStdin = true) {
+		if (readStdin) spawn(&eventLoop, event);
 		while (true) {
 			auto line = event.wait();
 			if (log.isOpen) log.writefln("[%8.3f] uci> %s", chrono.time(), line);
@@ -253,4 +253,34 @@ class Uci {
 		}
 	}
 }
+
+/* unittest */
+unittest {
+	stderr.writeln("Testing uci protocol");
+	Uci uci = new Uci();
+	uci.event.push("uci");
+	uci.event.push("ucinewgame");
+	uci.event.push("position startpos moves e2e4");
+	uci.event.push("show board");
+	uci.event.push("show moves");
+	uci.event.push("show weights");
+	uci.event.push("show eval");
+	uci.event.push("isready");
+	uci.event.push("go depth 15");
+	uci.event.push("show search");
+	uci.event.push("position fen 8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - -");
+	uci.event.push("show board");
+	uci.event.push("show moves");
+	uci.event.push("show eval");
+	uci.event.push("go movetime 15000");
+	uci.event.push("show search");
+	uci.event.push("position fen 8/k7/3n4/1Q6/8/8/8/K7 b - -");
+	uci.event.push("show board");
+	uci.event.push("show moves");
+	uci.event.push("show eval");
+	uci.event.push("go btime 1000 binc 100");
+	uci.event.push("quit");
+	uci.loop(false);
+}
+
 
