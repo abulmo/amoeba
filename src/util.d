@@ -6,8 +6,8 @@
  */
 
 module util;
-import std.stdio, std.array, std.string, std.datetime, std.format;
-import core.bitop, core.time, core.thread, core.stdc.stdlib;
+import std.array, std.datetime, std.format, std.stdio, std.string;
+import core.bitop, core.simd, core.time, core.thread, core.stdc.stdlib;
 
 version (LDC) import ldc.intrinsics;
 else version (GNU) import gcc.builtins;
@@ -16,17 +16,9 @@ else version (GNU) import gcc.builtins;
  * bit utilities
  */
 /* Swap the bytes of a bitboard (vertical mirror of a Chess board) */
-version (DMD) alias swapBytes = bswap;
-else version (LDC) alias swapBytes = llvm_bswap;
+version (LDC) alias swapBytes = llvm_bswap;
 else version(GNU) alias swapBytes = __builtin_bswap64;
-else {
-	ulong swapBytes(ulong b) {
-		b = ((b >>  8) & 0x00FF00FF00FF00FF) | ((b <<  8) & 0xFF00FF00FF00FF00);
-		b = ((b >> 16) & 0x0000FFFF0000FFFF) | ((b << 16) & 0xFFFF0000FFFF0000);
-		b = ((b >> 32) & 0x00000000FFFFFFFF) | ((b << 32) & 0xFFFFFFFF00000000);
-		return b;
-	}
-}
+else alias swapBytes = bswap;
 
 /* Check if a single bit is set */
 bool hasSingleBit(const ulong b) {
@@ -35,7 +27,12 @@ bool hasSingleBit(const ulong b) {
 
 /* Get the first bit set */
 version (LDC) int firstBit(ulong b) {return cast (int) llvm_cttz(b, true);}
+else version (GDC) alias firstBit = __builtin_ctz;
 else alias firstBit = bsf;
+
+/* Get the last bit set */
+version (GDC) alias firstBit = __builtin_clz;
+else alias lastBit = bsr;
 
 /* Extract a bit */
 int popBit(ref ulong b) {
@@ -84,9 +81,9 @@ void writeBitboard(const ulong b, File f = stdout) {
  * prefetch
  */
 void prefetch(void *v) {
-	version (DMD) prefetch!(0, 3)(v);
 	version (GNU) __builtin_prefetch(v);
-	version (LDC) llvm_prefetch(v, 0, 3, 1);
+	else version (LDC) llvm_prefetch(v, 0, 3, 1);
+	else core.simd.prefetch!(false, 3)(v);
 }
 
 
@@ -209,10 +206,10 @@ shared class Event {
 
 /* a replacement for assert that is more practical for debugging */
 void claim(bool allegation, string file = __FILE__, const int line = __LINE__) {
-		if (!allegation) {
-			stderr.writeln(file, ":", line, ": Assertion failed.");
-			abort();
-		}
+	if (!allegation) {
+		stderr.writeln(file, ":", line, ": Assertion failed.");
+		abort();
+	}
 }
 
 /* find a substring between two strings */
