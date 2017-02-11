@@ -5,7 +5,7 @@
  */
 
 import board, move, util;
-import std.stdio, std.string, std.algorithm, std.uni;
+import std.algorithm, std.stdio, std.string, std.uni;
 import core.atomic;
 
 /*
@@ -349,7 +349,7 @@ shared class GameBase {
 		lock = new shared Lock;
 	}
 
-	size_t length() @property {
+	size_t length() const @property {
 		return games.length;
 	}
 
@@ -416,10 +416,12 @@ shared class GameBase {
 	}
 
 	/* get next game */
-	ref shared(Game) next(const bool loop = false) {
+	shared(Game) next(const bool loop = false) {
 		synchronized (lock) {
 			if (index < games.length) atomicOp!"+="(index, 1);
-			else if (loop) index = 1;
+			else {
+				if (loop) index = 1; else return null;
+			}
 			return games[index - 1];
 		}
 	}
