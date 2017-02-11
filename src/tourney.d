@@ -5,9 +5,8 @@
  * © 2016-2017 Richard Delorme
  */
 
-import std.stdio, std.conv, std.range, std.string, std.format, std.algorithm;
-import std.math, std.mathspecial, std.process, std.parallelism, std.getopt;
 import util, board, move, game;
+import std.conv, std.getopt, std.math, std.mathspecial, std.parallelism, std.process, std.stdio, std.range, std.string, std.format, std.algorithm;
 
 /*
  * Engine
@@ -176,7 +175,7 @@ enum Var { none, trinomial, pentanomial, all };
  * Sequential Probability Ratio test (SPRT)
  *  - SPRT is computed directly from the wdl scores, not the elo
  *  - SPRT use a 5-nomial distribution to compute the variance
- * See the following discussion in talkchess for rationality:
+ * See the following discussion const talkchess for rationality:
  *
  */
 struct SPRT {
@@ -263,42 +262,40 @@ public:
 		writefln("pair:   0: %d, 0.5: %d, 1: %d, 1.5: %d, 2: %d", n[0], n[1], n[2], n[3], n[4]);
 	}
 
-	/* stop if llr condition are met */
-	bool stop(Var V = Var.pentanomial) const {
+	/* compute llr for a given variance */
+	bool LLR(const double v) const {
 		ulong n = w + d + l;
 		double score = (w + 0.5 * d) / n;
 		bool end = true;
+		double σ = sqrt(v);
+		double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
+		double los = v > 0.0 ? normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ) : 0.5;
 
-		if (V & Var.pentanomial) {
-			double v = var5(), σ = sqrt(v);
-			double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
-			double los = normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ);
+		writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
+		writefln("LOS: %.2f %%", 100.0 * los);
+		writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
 
+		if (llr < llr0) writeln("test rejected");
+		else if (llr > llr1) writeln("test accepted");
+		else end = false;
+		writeln();
+
+		return end;
+	}
+
+
+	/* stop if llr condition are met */
+	bool stop(const Var v) const {
+		bool end = false;
+
+		if (v & Var.pentanomial) {
 			writeln("Using variance of the pentanomial distribution of game pairs:");
-			writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
-			writefln("LOS: %.2f %%", 100.0 * los);
-			writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
-
-			if (llr < llr0) writeln("test rejected");
-			else if (llr > llr1) writeln("test accepted");
-			else end = false;
-			writeln();
+			end = LLR(var5());
 		}
 		
-		if (V & Var.trinomial) {
-			double v = var3(), σ = sqrt(v);
-			double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
-			double los = normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ);
-
+		if (v & Var.trinomial) {
 			writeln("Using variance of the trinomial distribution of single games:");
-			writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
-			writefln("LOS: %.2f %%", 100.0 * los);
-			writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
-
-			if (llr < llr0) writeln("test rejected");
-			else if (llr > llr1) writeln("test accepted");
-			else end = false;
-			writeln();
+			end = LLR(var3());
 		}
 
 		return end; 
@@ -369,9 +366,9 @@ public:
 
 	/* loop const parallel thru the games */
 	void loop(const int nGames, const double time, const Var v) {
-		bool done = false;
+		shared bool done = false;
 		foreach (i; taskPool.parallel(iota(nGames))) {
-			if (!done) done = (match(i, openings.next(true), time, v) && i >= 99);
+			if (!done) done = match(i, openings.next(true), time, v);
 		}
 		taskPool.finish(true);
 	}
@@ -394,28 +391,28 @@ void main(string [] args) {
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time,
 		"book|b", &openingFile, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
-		"elo0|H0", &H0, "elo1|H1", &H1, "alpha|α", &α, "beta|β", &β, "variance|V", &var,
-		"help|h", &showHelp, "version|v", &showVersion);
+		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
+		"help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.1\n© 2017 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.2\n© 2017 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
 		writeln("\ntourney --engine|-e <cmd> --engine|-e <cmd>  [optional settings]") ;
 		writeln("    --engine|-e <cmd>        launch an engine with <cmd>. 2 engines should be loaded");
-		writeln("    --time|-t <movetime>     time (in seconds) to play a move (default 0.1s)");
+		writeln("    --time|-t <movetime>     time (const seconds) to play a move (default 0.1s)");
 		writeln("    --book|-b <pgn|epd file> opening book");
 		writeln("    --output|-o <pgn file>   save the played games");
 		writeln("    --games|-g <games>       max number of game pairs to play (default 30000)");
 		writeln("    --cpu|-n <cpu>           number of games to play in parallel (default 1)");
-		writeln("    --elo0|-H0 <elo>         H0 hypothesis (default = 0)");
-		writeln("    --elo1|-H1 <elo>         H1 hypothesis (default = 5)");
-		writeln("    --alpha|-α <alpha>       type I error (default = 0.05)");
-		writeln("    --beta|-β <beta>         type II error (default = 0.05)");
-		writeln("    --variance|-V <type>     3nomial|5nomial|all (default=all) ");
+		writeln("    --elo0  <elo>            H0 hypothesis (default = 0)");
+		writeln("    --elo1  <elo>            H1 hypothesis (default = 5)");
+		writeln("    --alpha <alpha>          type I error (default = 0.05)");
+		writeln("    --beta  <beta>           type II error (default = 0.05)");
+		writeln("    --variance|-v <type>     none|3nomial|5nomial|all (default=all) ");
 		writeln("    --help|-h                display this help");
-		writeln("    --version|-v             show version number");
-		writeln("\nFor example:\n$ tourney -e amoeba-2.1 -e amoeba-2.0 -g 30000 -b opening.pgn -t 0.1 -n 3 -o game.pgn");
+		writeln("    --version                show version number");
+		writeln("\nFor example:\n$ tourney -e amoeba-2.1 -e amoeba-2.0 -g 30000 -b opening.pgn -t 0.1 -n 3 -o game.pgn -v 5nomial");
 		writeln("[...]");
 		writeln("Amoeba 2.1-l64p vs Amoeba 2.0.l64p");
 		writeln("results: 3524 games");
@@ -426,7 +423,7 @@ void main(string [] args) {
 		writeln("LLR: 2.992 [-2.944, 2.944]");
 		writeln("test accepted");
 	}
-		
+
 	if (engineName.length != 2) {
 		if (!showVersion && !showHelp) stderr.writeln("Two engines and only two needed");
 		return;
@@ -446,5 +443,13 @@ void main(string [] args) {
 	engines.start();
 	engines.loop(nGames, time, v);
 	engines.end();
+}
+
+unittest {
+	SPRT sprt = SPRT(0, 5, α, β);
+	sprt.w = 47; sprt.d = 356; sprt.l = 25;
+	sprt.n = [0, 15, 163, 35, 1];
+	sprt.stop(v);
+
 }
 
