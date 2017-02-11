@@ -203,8 +203,8 @@ public:
 	MoveItem [Limits.movesMax] item;
 	size_t index;
 private:
-	size_t n;
 	enum Stage {ttMove1, ttMove2, captureGeneration, captureSelection, killer1, killer2, refutation, quietGeneration, evasionGeneration, moveSelection };
+	size_t n;
 	bool captureOnly;
 	Move [2] ttMove;
 	Move [2] killer;
@@ -302,7 +302,7 @@ public:
 	}
 
 	/* init (from main search) */
-	void init(const bool inCheck, const ref Move [2] ttm, const ref Move[Color.size] k, const ref Move r, const ref History h) {
+	void setup(const bool inCheck, const ref Move [2] ttm, const ref Move[Color.size] k, const ref Move r, const ref History h) {
 		ttMove = ttm;
 		killer = k;
 		refutation = r;
@@ -313,11 +313,8 @@ public:
 	}
 	
 	/* init (from quiescence search) */
-	void init(const bool inCheck, const ref Move [2] ttm) {
+	void setup(const bool inCheck, const ref Move [2] ttm) {
 		ttMove = ttm;
-		killer[] = 0;
-		refutation = 0;
-		history = null;
 		stage = inCheck ? Stage.evasionGeneration : Stage.ttMove1;
 		captureOnly = true;
 		index = n = 0;
@@ -325,8 +322,6 @@ public:
 
 	/* staged - move generation (aka spaghetti code) */
 	ref MoveItem selectMove(Board board) {
-		const Stage oldStage = stage;
-
 		final switch (stage) {
 		// best move from transposition table
 		case Stage.ttMove1:
@@ -415,7 +410,7 @@ public:
 	/* insert a move as ith move */
 	void setBest(const Move m, const size_t i = 0) {
 		foreach (j; 0 .. n) if (m == item[j].move) {
-			auto tmp = item[j];
+			const MoveItem tmp = item[j];
 			foreach_reverse (k; i .. j) item[k + 1] = item[k];
 			item[i] = tmp;
 		}
@@ -442,9 +437,8 @@ public:
 	}
 
 	/* append a move built from origin & destination squares */
-	ref Moves push(const Square from, const Square to) {
+	void push(const Square from, const Square to) {
 		item[n++].move = (from | to << 6);
-		return this;
 	}
 
 	/* append a move */
@@ -453,20 +447,18 @@ public:
 	}
 
 	/* append promotions from origin & destination squares */
-	ref Moves pushPromotions(const Square from, const Square to) {
+	void pushPromotions(const Square from, const Square to) {
 		item[n++].move = (from | to << 6 | Piece.queen << 12);
 		item[n++].move = (from | to << 6 | Piece.knight << 12);
 		item[n++].move = (from | to << 6 | Piece.rook << 12);
 		item[n++].move = (from | to << 6 | Piece.bishop << 12);
-		return this;
 	}
 
 	/* generate all moves */
-	ref Moves generate(Board board) {
+	void generate(Board board) {
 		index = n = 0;
 		if (board.inCheck) board.generateEvasions(this);
 		else board.generateMoves(this);
-		return this;
 	}
 
 	/* convert to string */
@@ -519,39 +511,35 @@ struct Line {
 	}
 
 	/* clear */
-	ref Line clear() {
+	void clear() {
 		n = 0;
-		return this;
 	}
 
 	/* append a move */
-	ref Line push(const Move m) {
+	void push(const Move m) {
 		debug claim(n < plyMax);
 		move[n++] = m;
-		return this;
 	}
 
 	/* remove the last pushed move & return it */
-	ref Line pop() {
+	void pop() {
 		debug claim(n > 0);
 		--n;
-		return this;
 	}
 
 	/* append another line */
-	ref Line push(const ref Line l) {
+	void push(const ref Line l) {
 		foreach (m; l.move[0 .. l.n]) push(m);
-		return this;
 	}
 
 	/* set */
-	ref Line set(const Move m, const ref Line l) {
-		return clear().push(m).push(l);
+	void set(const Move m, const ref Line l) {
+		clear(); push(m); push(l);
 	}
 
 	/* set */
-	ref Line set(const ref Line line) {
-		return clear().push(line);
+	void set(const ref Line line) {
+		clear(); push(line);
 	}
 
 	/* Convert it to a string */
