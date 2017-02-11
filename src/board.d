@@ -7,9 +7,7 @@
 module board;
 
 import move, util;
-import std.stdio, std.ascii, std.uni, std.format, std.string, std.conv;
-import std.algorithm, std.getopt, std.math, std.random;
-debug import core.stdc.stdlib : abort;
+import std.algorithm, std.ascii, std.conv, std.format, std.getopt, std.math, std.random, std.stdio, std.string, std.uni;
 
 /* limits */
 enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256}
@@ -26,7 +24,7 @@ Color opponent(const Color c) {
 
 // Conversion from a char
 Color toColor(const char c) {
-	auto i = indexOf("wb", c);
+	size_t i = indexOf("wb", c);
 	if (i == -1) i = Color.size;
 	return cast (Color) i;
 }
@@ -39,7 +37,7 @@ enum Piece : ubyte {none, pawn, knight, bishop, rook, queen, king, size}
 
 /* Convert to a piece from a char */
 Piece toPiece(const char c) {
-	auto i = indexOf(".pnbrqk", c, CaseSensitive.no);
+	size_t i = indexOf(".pnbrqk", c, CaseSensitive.no);
 	if (i == -1) i = 0;
 	return cast (Piece) i;
 }
@@ -61,7 +59,7 @@ CPiece toCPiece(const Piece p, const Color c) {
 
 /* Conversion from a char */
 CPiece toCPiece(const char c) {
-	auto i = indexOf(".PpNnBbRrQqKk", c);
+	size_t i = indexOf(".PpNnBbRrQqKk", c);
 	if (i == -1) i = 0;
 	return cast (CPiece) i;
 }
@@ -171,7 +169,7 @@ enum Rank {
 enum Castling : ubyte {none = 0, K = 1, Q = 2, k = 4, q = 8, size = 16}
 
 int toCastling(const char c) {
-	auto i = indexOf("KQkq", c);
+	size_t i = indexOf("KQkq", c);
 	if (i == -1) return 0;
 	else return 1 << i;
 }
@@ -257,8 +255,6 @@ struct PawnKey {
 
 	/* update the key with a move */
 	void update(const Board board, Move move) {
-		Square x = Square.none;
-		const Color player = board.player;
 		const CPiece p = board[move.from];
 		const Board.Stack *s = &board.stack[board.ply];
 
@@ -414,7 +410,7 @@ private immutable(bool [Limits.moveSize][Piece.size]) legalInit() {
 
 	foreach (x; Square.a1 .. Square.size) {
 		int f = file(x), r = rank(x);
-		int i, j, to;
+		int i, j;
 
 		foreach (c; Color.white .. Color.size) {
 			for (i = -2; i <= 2; ++i)
@@ -567,7 +563,6 @@ public:
 	Color player;
 	int ply, plyOffset;
 
-	/* static values */
 	static immutable Mask [Square.size] mask;
 private:
 	static immutable bool [Limits.moveSize][Piece.size] legal;
@@ -687,10 +682,8 @@ private:
 
 	/* generate all moves from a square */
 	static void generateMoves(ref Moves moves, ulong attack, const Square from) {
-		Square to;
-
 		while (attack) {
-			to = popSquare(attack);
+			Square to = popSquare(attack);
 			moves.push(from, to);
 		}
 	}
@@ -780,8 +773,7 @@ public:
 		return coverage!p(x, occupancy, c) & target;
 	}
 
-	/* Clear the board */
-	Board clear() {
+	void clear() {
 		foreach (p; Piece.none .. Piece.size) piece[p] = 0;
 		foreach (c; Color.white .. Color.size) color[c] = 0;
 		foreach (x; Square.a1 .. Square.size) cpiece[x] = CPiece.none;
@@ -789,11 +781,10 @@ public:
 		xKing[0] = xKing[1] = Square.none;
 		player = Color.white;
 		ply = 0;
-		return this;
 	}
 
 	/* Invert the board */
-	Board mirror() {
+	void mirror() {
 		foreach (p; Piece.none .. Piece.size) piece[p] = swapBytes(piece[p]);
 		foreach (c; Color.white .. Color.size) color[c] = swapBytes(color[c]);
 		swap(color[Color.white], color[Color.black]);
@@ -811,8 +802,6 @@ public:
 			if (stack[i].enpassant != Square.none) stack[i].enpassant ^= 56;
 		}
 		stack[ply].key.set(this);
-
-		return this;
 	}
 
 	/* set the board from a FEN string */
@@ -823,10 +812,7 @@ public:
 		string [] s = fen.split();
 
 		void error(string msg) {
-			stderr.writeln("Parsing FEN error: ", msg);
-			stderr.writeln('\"', fen, '\"');
-			debug abort();
-			throw new Error("Bad FEN");
+			throw new Exception("Bad FEN: " ~ msg ~ " ; fen ");
 		}
 
 		clear();
@@ -1006,7 +992,7 @@ public:
 		// repetition
 		int nRepetition = 0;
 		const end = max(0, ply - stack[ply].fifty);
-		for (auto i = ply - 4; i >= end; i -= 2) {
+		for (int i = ply - 4; i >= end; i -= 2) {
 			if (stack[i].key.code == stack[ply].key.code && ++nRepetition >= 2) return Result.repetitionDraw;
 		}
 
