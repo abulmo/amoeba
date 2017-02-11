@@ -7,7 +7,7 @@
 module search;
 
 import board, eval, kpk, move, util;
-import std.stdio, std.conv, std.string, std.format, std.algorithm, std.math, std.getopt;
+import std.algorithm, std.conv, std.format, std.getopt, std.math, std.stdio, std.string;
 
 /* Hash table score bound */
 enum Bound {upper, lower, exact}
@@ -41,6 +41,11 @@ struct Entry {
 		info = cast (ushort) ((info & 511) | (date << 9));
 	}
 
+	void store(const Bound b, const int d, const int date, const int v, const int ply) {
+		info = cast (ushort) (b | (d << 2) | (date << 9));
+		value = cast (short) (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
+	}
+
 	/* score (with Mate score rescaled) */
 	int score(const int ply) const {
 		return value < Score.low ? value + ply : (value > Score.high ? value - ply : value);
@@ -48,20 +53,14 @@ struct Entry {
 
 	/* update an existing entry */
 	void update(const int d, const int ply, const int date, const Bound b, const int v, const Move m) {
-		if (d >= depth) {
-			info = cast (ushort) (b | (d << 2) | (date << 9));
-			value = cast (short) (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
-		}
-		if (m != move[0]) {
-			move[1] = move[0]; move[0] = m;
-		}
+		if (d >= depth) store(b, d, date, v, ply);
+		if (m != move[0]) { move[1] = move[0]; move[0] = m;	}
 	}
 
 	/* set a new entry */
 	void set(const Key k, const int d, const int ply, const int date, const Bound b, const int v, const Move m) {
 		code = k.code;
-		info = cast (ushort) (b | (d << 2) | (date << 9));
-		value = cast (short) (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
+		store(b, d, date, v, ply);
 		move = [m, 0];
 	}
 
@@ -88,13 +87,9 @@ final class TranspositionTable {
 
 	/* resize */
 	void resize(size_t size) {
-		const lMax = size / Entry.sizeof;
-		size_t l;
-		
-		for (l = 1; l < lMax; l <<= 1) {}
-		if (l > lMax) l >>= 1;
-		if (l < 1) entry.length = mask = 0;
-		else {
+		entry.length = mask = 0;
+		const size_t l = 1 << lastBit(size / Entry.sizeof);
+		if (l >= 1) {
 			mask = l - 1;
 			entry.length = mask + bucketSize;
 		}
@@ -181,6 +176,7 @@ private:
 	struct Option {
 		Termination termination;
 		int depthInit;
+		int scoreInit;
 		size_t multiPv;
 		bool easy;
 		bool isPondering;
@@ -214,7 +210,7 @@ private:
 
 		/* save current search infos (pv + score) */
 		void store(const int iPv, int s, ref Line p) {
-			Move m = p.move[0];
+			const Move m = p.move[0];
 			foreach (i; iPv + 1 .. multiPv) {
 				if (m == pv[i].move[0]) {					
 					foreach_reverse (j; iPv .. i + 1) {
@@ -236,13 +232,14 @@ private:
 		}
 		
 		/* clear results */
-		void clear(const size_t n) {
+		void clear(const size_t n, const int scoreInit) {
 			nNodes = 0; depth = 0; time = 0.0;
 			multiPv = n;
 			foreach (i; 0 .. multiPv) {
 				score[i] = 0;
 				pv[i].clear();
 			}
+			score[0] = scoreInit;
 		}	
 
 		/* write the search result so far using UCI protocol */
@@ -402,7 +399,7 @@ private:
 		if (ply == Limits.plyMax) return eval(board, α, β);
 
 		// move generation: good captures & promotions if not in check
-		moves.init(board.inCheck, h.move);
+		moves.setup(board.inCheck, h.move);
 
 		while ((m = moves.selectMove(board).move) != 0) {
 			s = eval(board, m) + v;
@@ -499,7 +496,7 @@ private:
 		}
 
 		// prepare move generation
-		moves.init(board.inCheck, h.move, killer[ply], refutation[line.top & Limits.moveMask], history);
+		moves.setup(board.inCheck, h.move, killer[ply], refutation[line.top & Limits.moveMask], history);
 
 		const αOld = α;
 
@@ -551,8 +548,6 @@ private:
 	void αβRoot(int α, const int β, const int d) {
 		const αOld = α;
 		int s, bs = -Score.mate, e, r, iQuiet;
-		Result draw;
-		Entry h;
 
 		pv[0].clear();
 
@@ -655,7 +650,7 @@ private:
 		ply = 0;
 		nNodes = 0;
 		stop = false;
-		info.clear(option.multiPv);
+		info.clear(option.multiPv, option.scoreInit);
 		heuristicsClear();
 		iPv = 0;
 	}
@@ -664,7 +659,7 @@ private:
 	bool persist(const int d) const {
 		return checkTime(0.618034 * option.termination.time.max) 
 		    && !stop && d <= option.termination.depth.max
-		    && info.score[option.multiPv - 1] <= Score.mate - d && info.score[0] >= d - Score.mate;
+		    && info.score[option.multiPv - 1] <= Score.mate - d && info.score[option.multiPv - 1] >= d - Score.mate;
 	}
 
 	/* search limited on some moves */
@@ -701,12 +696,14 @@ public:
 		Move m;
 		static if (copy) board = b.dup; else board = b;
 		tt.probe(board.key, h);
-		rootMoves.init(board.inCheck, h.move, killer[0], refutation[0], history);
+		rootMoves.setup(board.inCheck, h.move, killer[0], refutation[0], history);
 		while ((m = rootMoves.selectMove(board).move) != 0) {}
 		if (h.bound == Bound.exact && h.move[0] == rootMoves[0]) {
 			option.depthInit = max(1, h.depth);
+			option.scoreInit = h.score(0);
 		} else {
 			option.depthInit = 1;
+			option.scoreInit = 0;
 		}
 		eval.set(board);
 	}
