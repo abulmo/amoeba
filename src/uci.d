@@ -7,7 +7,7 @@
 module uci;
 
 import board, eval, move, search, util;
-import std.algorithm, std.stdio, std.string, std.conv, std.array, std.concurrency, std.process;
+import std.algorithm, std.array, std.conv, std.concurrency, std.process, std.stdio, std.string;
 
 /* Some information about the compilation */
 string arch() @property {
@@ -52,7 +52,7 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba." ~ __DATE__ ~ "." ~ arch;
+		name = "Amoeba.191." ~ arch;
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
