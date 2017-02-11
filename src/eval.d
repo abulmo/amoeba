@@ -7,7 +7,7 @@
 module eval;
 
 import board, kpk, move, util, weight;
-import std.stdio, std.conv, std.algorithm;
+import std.algorithm, std.conv, std.stdio;
 
 /* Score limits */
 enum Score {mate = 30000, low = -29000, high = 29000, big = 3000}
@@ -96,9 +96,9 @@ private:
 
 	/* compute the attractive force of a target square x to a distant square y */
 	static double attraction(const Square x, const Square y) {
-		int r = rank(x) - rank(y);
-		int f = file(x) - file(y);
-		int d = (r * r + f * f);
+		const int r = rank(x) - rank(y);
+		const int f = file(x) - file(y);
+		const int d = (r * r + f * f);
 		return d == 0 ? 2.0 : 1.0 / d;
 	}
 
@@ -214,7 +214,6 @@ private:
 		const ulong P = b.color[player];
 		const ulong E = b.color[enemy];
 		const ulong V = b.piece[Piece.none];
-		const ulong O = ~V;
 		const ulong A = attack[enemy];
 		ulong attacker = b.piece[p] & P, a;
 		const Stack *s = &stack[ply];
@@ -254,7 +253,6 @@ private:
 		const ulong P = b.color[player];
 		const ulong E = b.color[enemy];
 		const ulong V = b.piece[Piece.none];
-		const ulong O = ~V;
 		const ulong A = attack[enemy];
 		ulong attacker = b.mask[x].bit, a;
 		const Stack *s = &stack[ply];
@@ -303,7 +301,7 @@ private:
 			double vShield = 0.0, vStorm = 0.0;
 		
 			do {
-				auto x = popSquare(attacker);
+				const Square x = popSquare(attacker);
 				Value mat, pos;
 
 				// open file ?
@@ -359,7 +357,7 @@ private:
 		ulong attacker = pawn[player];
 		
 		while (attacker) {
-			auto x = popSquare(attacker);
+			const Square x = popSquare(attacker);
 
 			write(x, ": ");
 
@@ -372,7 +370,7 @@ private:
 			else if ((pawn[player] & b.mask[x].backwardPawn[player]) == 0) write("backward, ");
 			else if (pawn[player] & b.mask[x].pawnAttack[enemy]) write("chained, ");
 			if (b.mask[x].bit & shield) write("in shield, ");
-			if (b.mask[x].bit & shield) write("on storm, ");
+			if (b.mask[x].bit & storm) write("on storm, ");
 			writeln();
 		}
 	}
@@ -395,7 +393,7 @@ private:
 		const Color enemy = opponent(player);
 		const ulong pawns = b.piece[Piece.pawn];
 		const ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
-		ulong attacker = pawn[player];
+		const ulong attacker = pawn[player];
 		Value v;
 		
 		Value mat, pos;
@@ -511,13 +509,13 @@ private:
 		writefln("King shield: %+4d", mixin("coeff.kingShield." ~ phase) / 16);
 		writefln("King storm: %+4d", mixin("coeff.kingStorm." ~ phase) / 16);
 		writeln("Pawn structure : material - positional");
-		writeln("passed pawn: ", mixin("coeff.passedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.passedPawn.positional." ~ phase) / 10, "%");
-		writeln("candidate pawn: ", mixin("coeff.candidatePawn.material." ~ phase) / 16,  ", ", mixin("coeff.candidatePawn.positional." ~ phase) / 10, "%");
-		writeln("isolated pawn: ", mixin("coeff.isolatedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.isolatedPawn.positional." ~ phase) / 10, "%");
-		writeln("double pawn: ", mixin("coeff.doublePawn.material." ~ phase) / 16,  ", ", mixin("coeff.doublePawn.positional." ~ phase) / 10, "%");
-		writeln("backward pawn: ", mixin("coeff.backwardPawn.material." ~ phase) / 16,  ", ", mixin("coeff.backwardPawn.positional." ~ phase) / 10, "%");
-		writeln("chained pawn: ", mixin("coeff.chainedPawn.material." ~ phase) / 16, ", ", mixin("coeff.chainedPawn.positional." ~ phase) / 10, "%");
-		writeln("tempo: ", mixin("coeff.tempo." ~ phase));
+		writeln("passed pawn: ", mixin("coeff.passedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.passedPawn.positional." ~ phase) / 16, "%");
+		writeln("candidate pawn: ", mixin("coeff.candidatePawn.material." ~ phase) / 16,  ", ", mixin("coeff.candidatePawn.positional." ~ phase) / 16, "%");
+		writeln("isolated pawn: ", mixin("coeff.isolatedPawn.material." ~ phase) / 16,  ", ", mixin("coeff.isolatedPawn.positional." ~ phase) / 16, "%");
+		writeln("double pawn: ", mixin("coeff.doublePawn.material." ~ phase) / 16,  ", ", mixin("coeff.doublePawn.positional." ~ phase) / 16, "%");
+		writeln("backward pawn: ", mixin("coeff.backwardPawn.material." ~ phase) / 16,  ", ", mixin("coeff.backwardPawn.positional." ~ phase) / 16, "%");
+		writeln("chained pawn: ", mixin("coeff.chainedPawn.material." ~ phase) / 16, ", ", mixin("coeff.chainedPawn.positional." ~ phase) / 16, "%");
+		writeln("tempo: ", mixin("coeff.tempo." ~ phase) / 16);
 	}
 
 public:
@@ -647,12 +645,7 @@ public:
 
 	/* resize the pawn hash table */
 	void resize(size_t size) {
-		const lMax = size / PawnEntry.sizeof;
-		size_t l;
-		
-		for (l = 1; l < lMax; l <<= 1) {}
-		if (l > lMax) l >>= 1;
-		pawnTable.length = l;
+		pawnTable.length = 1 << lastBit(size / PawnEntry.sizeof);
 		debug writefln("pawnTT size: %s -> lMax: %s, l: %s entry.length: %s -> size: %s", size, lMax, l, pawnTable.length, pawnTable.length * PawnEntry.sizeof);
 	}
 
@@ -673,7 +666,7 @@ public:
 
 	/* display detailed evaluation */
 	void show(const Board board) {
-		Value [Piece.size][Color.size] material, positional, mobility, king;
+		Value [Piece.size][Color.size] material, positional, mobility;
 		Value [Color.size] value;
 		int [Color.size] m;
 
@@ -719,7 +712,7 @@ public:
 		foreach(Color c; Color.white .. Color.size) value[c] = pawnStructure(board, c);
 		writefln("pawn s. %+5d %+5d %+5d %+5d", value[0].opening/16, value[1].opening/16, value[0].endgame/16, value[1].endgame/16);
 		if (board.player == Color.white) writefln(" tempo  %+5d      %+5d", coeff.tempo.opening/16, coeff.tempo.endgame/16);
-		else writefln(" tempo  %+5d      %+5d", coeff.tempo.opening/16, coeff.tempo.endgame/16);
+		else writefln(" tempo        %+5d      %+5d", coeff.tempo.opening/16, coeff.tempo.endgame/16);
 
 		writefln(" stage  %+5d", stack[ply].stage);
 		writefln("  lazy  %+5d", opCall(board));
@@ -770,7 +763,7 @@ public:
 					s.kingZone[c] = Board.mask[x].king;
 				}
 				while (b) {
-					Square x = popSquare(b);
+					const Square x = popSquare(b);
 					s.value[c] += coeff.positional[p][forward(x, c)];
 				}
 			}
@@ -847,7 +840,6 @@ public:
 	int opCall(const Board b, const Move m) const {
 		const Color player = b.player;
 		const Color enemy = opponent(player);
-		const Stack *s = &stack[ply];
 		Value value = coeff.tempo * 2;
 
 		if (m.promotion) value += pieceValue(m.promotion, player, m.to);
