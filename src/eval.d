@@ -334,7 +334,7 @@ private:
 					mat += coeff.chainedPawn.material;
 					pos += coeff.chainedPawn.positional;
 				}
-				v += mat + (pos * coeff.positional[player][forward(x, player)]) / centipawn;
+				v += mat + (pos * coeff.positional[Piece.pawn][forward(x, player)]) / centipawn;
 
 				if (b.mask[x].bit & shield) vShield += attraction(x, k[player]);
 				if (b.mask[x].bit & storm)  vStorm  += attraction(x, k[enemy]);
@@ -355,22 +355,37 @@ private:
 		const ulong shield = (b.mask[k[player]].openFile[player] | b.mask[k[player]].passedPawn[player]);
 		const ulong storm  = (b.mask[k[enemy]].openFile[enemy] | b.mask[k[enemy]].passedPawn[enemy]);
 		ulong attacker = pawn[player];
-		
+	
+		void output(string msg, Value v) {
+			write(msg, ": ", toCentipawns(v), ", ");
+		}
+
+		void displayStructure(string msg, const PawnStructure c, const Square x) {
+			Value v = c.material + (c.positional * coeff.positional[Piece.pawn][forward(x, player)]) / centipawn;
+			output(msg, v);
+		}
+
+		void displayShieldStorm(string msg, const double s, const Value c) {
+			Value v;
+			v.opening = to!int(c.opening * s); 
+			output(msg, v);
+		}
+
 		while (attacker) {
 			const Square x = popSquare(attacker);
 
 			write(x, ": ");
 
 			if ((pawns & b.mask[x].openFile[player]) == 0) {
-				if ((pawn[enemy] & b.mask[x].passedPawn[player]) == 0) write("passed, ");
-				else write("candidate, ");
+				if ((pawn[enemy] & b.mask[x].passedPawn[player]) == 0) displayStructure("passed", coeff.passedPawn, x);
+				else displayStructure("candidate", coeff.candidatePawn, x);
 			}
-			if (attacker & b.mask[x].file) write("doubled, ");
-			if ((pawn[player] & b.mask[x].isolatedPawn) == 0) write("isolated, ");
-			else if ((pawn[player] & b.mask[x].backwardPawn[player]) == 0) write("backward, ");
-			else if (pawn[player] & b.mask[x].pawnAttack[enemy]) write("chained, ");
-			if (b.mask[x].bit & shield) write("in shield, ");
-			if (b.mask[x].bit & storm) write("on storm, ");
+			if (attacker & b.mask[x].file) displayStructure("doubled", coeff.doublePawn, x);
+			if ((pawn[player] & b.mask[x].isolatedPawn) == 0) displayStructure("isolated", coeff.isolatedPawn, x);
+			else if ((pawn[player] & b.mask[x].backwardPawn[player]) == 0) displayStructure("backward", coeff.backwardPawn, x);
+			else if (pawn[player] & b.mask[x].pawnAttack[enemy]) displayStructure("chained", coeff.chainedPawn, x);
+			if (b.mask[x].bit & shield) displayShieldStorm("in shield", attraction(x, k[player]), coeff.kingShield);
+			if (b.mask[x].bit & storm) displayShieldStorm("on storm", attraction(x, k[enemy]), coeff.kingStorm);
 			writeln();
 		}
 	}
@@ -428,7 +443,7 @@ private:
 			mat += coeff.chainedPawn.material;
 			pos += coeff.chainedPawn.positional;
 		}
-		v += mat + pos * coeff.positional[player][forward(x, player)] / centipawn;
+		v += mat + pos * coeff.positional[Piece.pawn][forward(x, player)] / centipawn;
 
 		return v;
 	}
