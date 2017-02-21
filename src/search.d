@@ -686,7 +686,7 @@ public:
 
 	/* resize the tt */
 	void resize(const size_t size) {
-		tt.resize(size * 31 / 32);
+		tt.resize(size);
 		eval.resize(size / 32);
 	}
 
