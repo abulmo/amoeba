@@ -325,9 +325,9 @@ class Amoeba {
 		f.write("\t"); foreach (i; 59 ..  61) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [59-60]");
 		f.write("\t"); foreach (i; 61 ..  68) f.writef("%+7.4f, ", weight[i]); f.writeln(" // positional      [61-74]");
 		f.write("\t"); foreach (i; 68 ..  75) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i; 75 ..  81) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure [75-87]");
+		f.write("\t"); foreach (i; 75 ..  81) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure [75-86]");
 		f.write("\t"); foreach (i; 81 ..  88) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i; 88 ..  89) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [88]");
+		f.write("\t"); foreach (i; 88 ..  89) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [87]");
 		f.writeln("\t// Endgame");
 		f.write("\t"); foreach (i; 89 ..  96) f.writef("%+7.4f, ", weight[i]); f.writeln("// material        [89-95]");
 		f.write("\t"); foreach (i; 96 .. 103) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe mobility   [96-102]");
