@@ -387,7 +387,6 @@ private immutable(Mask[Square.size]) maskInit() {
 		 		mask[x].king |= 1UL << y;
 			}
 		}
-
 		mask[x].castling = 15;	
 	}
 
