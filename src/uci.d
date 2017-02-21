@@ -52,7 +52,7 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba.191." ~ arch;
+		name = "Amoeba 2.2" ~ arch;
 		search = new Search;
 		search.event = event = new shared Event;
 		board = new Board;
