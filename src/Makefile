@@ -18,13 +18,13 @@ endif
 #gdc
 ifeq ($(DC),gdc)
 	ifeq ($(BUILD),fast)
-		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -O3 -flto -fwhole-program -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
+		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -O3 -frelease -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
 	else ifeq ($(BUILD),nopopcount)
-		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra  -O3 -flto -fwhole-program -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
+		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -O3 -frelease -fno-bounds-check -o $(EXE) -mtune=haswell
 	else ifeq ($(BUILD),debug) 
 		DFLAGS = -O0 -g -fdebug -o $(EXE)
 	else ifeq ($(BUILD),unittest)
-		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -O3 -flto -fwhole-program -funittest -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
+		DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -O3 -funittest -fno-bounds-check -o $(EXE) -mtune=haswell -fversion=withPopCount -msse4.2 
 	endif
 	PGO_GEN = -fprofile-generate -lgcov
 	PGO_USE = -fprofile-use
@@ -57,7 +57,7 @@ ifeq ($(DC),dmd)
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -g -gc -debug
 	else ifeq ($(BUILD),unittest)
-		DFLAGS = -O -unittest -inline -boundscheck=off -w -version=withPopCount
+		DFLAGS = -unittest -boundscheck=off -w -version=withPopCount -cov
 	endif
 	PGO_GEN = 
 	PGO_USE = 
@@ -117,6 +117,11 @@ tune: $(TUNE_SRC)
 	$(MAKE) EXE=tune	
 
 clean:
-	$(RM) *.o trace.* *.log *.gcda *.profraw
+	$(RM) *.o trace.* *.log *.gcda *.profraw *.profdata
+
+cleanall:
+	$(MAKE) clean
+	$(RM) amoeba-* amoeba tourney tune core.*
+	
 
 
