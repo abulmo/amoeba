@@ -9,10 +9,8 @@ module eval;
 import board, kpk, move, util, weight;
 import std.algorithm, std.conv, std.stdio;
 
-/* Score limits */
-enum Score {mate = 30000, low = -29000, high = 29000, big = 3000}
 
-/* 
+/*
  * Value
  */
 struct Value {
@@ -118,9 +116,9 @@ private:
 
 	/* Build positional array coeffs from an array of attractive squares */
 	static void buildPositional(string phase)(ref Value [Square.size] positional, const Square [] y, const double a, const bool isPawn) {
-		double w;	
+		double w;
 		double [Square.size] p;
-	
+
 		foreach (Square x; Square.a1 .. Square.size) {
 			w = attraction(x, y[0]);
 			foreach (i; 1 .. y.length) w = max(attraction(x, y[i]), w);
@@ -182,7 +180,7 @@ private:
 
 		}
 	}
-	
+
 	/* compute a bitboard of all squares attacked by a type of piece */
 	void setCoverage(Piece p)(const Board b) {
 		const ulong O = ~b.piece[Piece.none];
@@ -228,6 +226,10 @@ private:
 			a = player == Color.white ? attacker << 8 : attacker >> 8;
 			v += coeff.safePawnAdvance * countBits(a & V & ~A);
 			v += coeff.unsafePawnAdvance * countBits(a & V & A);
+			v += coeff.safePawnBlock * countBits(a & E & ~A);
+			v += coeff.unsafePawnBlock * countBits(a & E & A);
+			v += coeff.safePawnDouble * countBits(a & P & ~A);
+			v += coeff.unsafePawnDouble * countBits(a & P & A);
 		}
 
 		while (attacker) {
@@ -299,7 +301,7 @@ private:
 			const ulong shield = (b.mask[k[player]].openFile[player] | b.mask[k[player]].passedPawn[player]);
 			const ulong storm  = (b.mask[k[enemy]].openFile[enemy] | b.mask[k[enemy]].passedPawn[enemy]);
 			double vShield = 0.0, vStorm = 0.0;
-		
+
 			do {
 				const Square x = popSquare(attacker);
 				Value mat, pos;
@@ -355,7 +357,7 @@ private:
 		const ulong shield = (b.mask[k[player]].openFile[player] | b.mask[k[player]].passedPawn[player]);
 		const ulong storm  = (b.mask[k[enemy]].openFile[enemy] | b.mask[k[enemy]].passedPawn[enemy]);
 		ulong attacker = pawn[player];
-	
+
 		void output(string msg, Value v) {
 			write(msg, ": ", toCentipawns(v), ", ");
 		}
@@ -367,7 +369,7 @@ private:
 
 		void displayShieldStorm(string msg, const double s, const Value c) {
 			Value v;
-			v.opening = to!int(c.opening * s); 
+			v.opening = to!int(c.opening * s);
 			output(msg, v);
 		}
 
@@ -410,7 +412,7 @@ private:
 		const ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
 		const ulong attacker = pawn[player];
 		Value v;
-		
+
 		Value mat, pos;
 
 		// open file ?
@@ -533,6 +535,22 @@ private:
 		writeln("tempo: ", mixin("coeff.tempo." ~ phase) / 16);
 	}
 
+	void showBoard(string title, const Board board) {
+		writeln("\n", title);
+		writeln("      a     b     c     d     e     f     g     h");
+		for (int i = 7; i >= 0; --i) {
+			write(i + 1, ". ");
+			for (int j = 0; j < 8; ++j) {
+				Square x = cast (Square) (i * 8 + j);
+				int score = toCentipawns(evalSquare(board, x));
+				if (toColor(board[x]) == Color.black) score = -score;
+				writef("%+5d ", score) ;
+			}
+			writeln(" .", i + 1);
+		}
+		writeln("      a     b     c     d     e     f     g     h\n");
+	}
+
 public:
 	/* clear (the pawn hashtable) */
 	void clear() {
@@ -548,7 +566,7 @@ public:
 		static immutable Square [] knightCenter = [Square.d4, Square.e4, Square.d5, Square.e5];
 		static immutable Square [] bishopCenter = [Square.c3, Square.f3, Square.c6, Square.f6];
 		static immutable Square [] rook7thRank = [Square.b7, Square.c7, Square.d7, Square.e7, Square.f7, Square.g7];
-		static immutable Square [] rookCenter = [Square.a4, Square.b4, Square.c4, Square.d4, Square.e4, Square.f4, Square.g4, Square.h4, 
+		static immutable Square [] rookCenter = [Square.a4, Square.b4, Square.c4, Square.d4, Square.e4, Square.f4, Square.g4, Square.h4,
 		                                  Square.a5, Square.b5, Square.c5, Square.d5, Square.e5, Square.f5, Square.g5, Square.h5];
 		static immutable Square [] queenCenter = [Square.d4, Square.e4, Square.d5, Square.e5];
 		static immutable Square [] kingCastle = [Square.b1, Square.g1];
@@ -640,7 +658,7 @@ public:
 		buildPositional!"endgame"(coeff.positional[Piece.queen],  queenCenter,  w[i++], false);
 		buildPositional!"endgame"(coeff.positional[Piece.king],   kingCenter,   w[i++], false);
 		adjustPawn!"endgame"(coeff.positional[Piece.pawn]);
-	
+
 		// pawn structure
 		coeff.passedPawn.material.endgame      = scale(w[i++]);
 		coeff.candidatePawn.material.endgame   = scale(w[i++]);
@@ -661,7 +679,7 @@ public:
 	/* resize the pawn hash table */
 	void resize(size_t size) {
 		pawnTable.length = 1 << lastBit(size / PawnEntry.sizeof);
-		debug writefln("pawnTT size: %s -> lMax: %s, l: %s entry.length: %s -> size: %s", size, lMax, l, pawnTable.length, pawnTable.length * PawnEntry.sizeof);
+		debug writefln("pawnTT size: %s -> entry.length: %s -> size: %s", size, pawnTable.length, pawnTable.length * PawnEntry.sizeof);
 	}
 
 	/* Constructor (initialize evaluation weights & allocate pawnhash table) */
@@ -716,7 +734,7 @@ public:
 				mobility[0][p].opening, mobility[1][p].opening, mobility[0][p].endgame, mobility[1][p].endgame,
 			);
 		}
-		
+
 
 		foreach(Color c; Color.white .. Color.size) m[c] = countBits(board.color[c] & ~board.piece[Piece.pawn]);
 		if (m[0] > m[1]) {
@@ -734,26 +752,14 @@ public:
 		writefln("  full  %+5d", opCall(board, Score.low, Score.high));
 		writeln("Pawn structure:"); foreach(Color c; Color.white .. Color.size)  showPawnStructure(board, c);
 
-		writeln("\nEval per square");
-		writeln("      a     b     c     d     e     f     g     h");
-		for (int i = 7; i >= 0; --i) {
-			write(i + 1, ". ");
-			for (int j = 0; j < 8; ++j) {
-				Square x = cast (Square) (i * 8 + j);
-				int score = toCentipawns(evalSquare(board, x));
-				if (toColor(board[x]) == Color.black) score = -score;
-				writef("%+5d ", score) ;
-			}
-			writeln(" .", i + 1);
-		}
-		writeln("      a     b     c     d     e     f     g     h\n");
+		showBoard("Eval per square", board);
 	}
 
 	/* display setting */
-	void showSetting() {
-		writefln("PawnTT size: %s entries %s Mb", pawnTable.length, pawnTable.length * PawnEntry.sizeof);
-	}	
-	
+	string setting() {
+		return "PawnTT size: " ~ to!string(pawnTable.length) ~ " entries " ~ to!string(pawnTable.length * PawnEntry.sizeof) ~ " Mb";
+	}
+
 
 	/* start a new eval (material + positional) from a new position */
 	void set(const Board board) {
