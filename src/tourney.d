@@ -16,6 +16,33 @@ private:
 	string [] cmd;
 	string name;
 	ProcessPipes pipe;
+	Game.Info info;
+
+	/* send a message to an engine */
+	void send(T...)(T args) {
+		pipe.stdin.writeln(args);
+		pipe.stdin.flush();
+	}
+
+	/* receive a message from an engine */
+	string receive() {
+		string l = pipe.stdout.readln();
+		l = chomp(l);
+		return l;
+	}
+
+	/* read game info */
+	void getInfo(string [] words) {
+		foreach(i; 0 .. words.length - 1) {
+			if (words[i] == "depth") info.depth = cast (ubyte) max(0, min(to!int(words[i + 1]), 255));
+			else if (words[i] == "cp") info.score = to!short(words[i + 1]);
+			else if (words[i] == "mate") {
+				int matein = to!int(words[i + 1]);
+				if (matein < 0) info.score = cast (short) (-Score.mate - matein * 2);
+				else if (matein > 0) info.score = cast (short)  (Score.mate - matein * 2 + 1);
+			} else if (words[i] == "time") info.time = 0.001 * to!int(words[i + 1]);
+		}
+	}
 
 
 public:
@@ -31,19 +58,6 @@ public:
 		cmd ~= s;
 	}
 
-	/* send a message to an engine */
-	void send(T...)(T args) {
-		pipe.stdin.writeln(args); 
-		pipe.stdin.flush();
-	}
-
-	/* receive a message from an engine */
-	string receive() {
-		string l = pipe.stdout.readln();
-		l = chomp(l);
-		return l;
-	}
-
 	/* wait for an engine to be ready */
 	void ready() {
 		string l;
@@ -54,7 +68,7 @@ public:
 	}
 
 	/* start an engine */
-	void start() {
+	void start(bool showDebug) {
 		string l;
 
 		pipe = pipeProcess(cmd);
@@ -62,19 +76,19 @@ public:
 		do {
 			l = receive();
 			if (l.skipOver("id name")) name = l.strip();
-			debug if (l.skipOver("option name Log")) send("setoption name Log value true");
-		} while (l != "uciok");		
+			if (showDebug && l.skipOver("option name Log type check")) send("setoption name Log value true");
+		} while (l != "uciok");
 	}
 
 	/* end an engine */
 	void end() {
-		send("quit");		
+		send("quit");
 		wait(pipe.pid);
 	}
 
 	/* new game */
 	void newGame() {
-		send("ucinewgame");		
+		send("ucinewgame");
 		ready();
 	}
 
@@ -94,9 +108,13 @@ public:
 	/* go */
 	Move go(const int ms) {
 		string l;
+		info = Game.Info.init;
 		send("go movetime ", ms);
 		while(true) {
 			l = receive();
+			if (l.skipOver("info ")) {
+				getInfo(l.split());
+			}
 			if (l.skipOver("bestmove ")) {
 				Move m  = l.strip().fromPan();
 				return m;
@@ -113,7 +131,7 @@ class Match {
 	Engine [Color.size] engine;
 	shared Game game;
 	int ms;
-	
+
 	/* create a new match setting */
 	this (Engine [Color.size] e, const shared Game opening, const double t) {
 		engine = e;
@@ -127,14 +145,14 @@ class Match {
 		Result r;
 		Move m;
 		string fen = null;
-		
+
 		foreach (t; game.tags) if (t.name == "FEN") fen = t.value;
 		if (fen is null) b.set(); else b.set(fen);
 		b.update(game.moves);
-		
+
 		engine[Color.white].newGame();
 		engine[Color.black].newGame();
-	
+
 		while((r = b.isGameOver) == Result.none) {
 			engine[b.player].position(fen, game.moves);
 			m = engine[b.player].go(ms);
@@ -144,8 +162,8 @@ class Match {
 				writefln("%s played the illegal move %s", engine[b.player].name, m.toPan());
 				break;
 			}
+			game.push(m, engine[b.player].info);
 			b.update(m);
-			game.push(m);
 		}
 
 		// game infos
@@ -155,8 +173,8 @@ class Match {
 		game.push("Site", "??");
 		game.push("Date", date());
 		game.push("Round", format("%d", round + 1));
-		game.push("Black", engine[Color.black].name);
 		game.push("White", engine[Color.white].name);
+		game.push("Black", engine[Color.black].name);
 		game.push("Result", r.fromResult!false());
 		if (fen !is null) {
 			game.push("FEN", fen);
@@ -175,7 +193,7 @@ enum Var { none, trinomial, pentanomial, all };
  * Sequential Probability Ratio test (SPRT)
  *  - SPRT is computed directly from the wdl scores, not the elo
  *  - SPRT use a 5-nomial distribution to compute the variance
- * See the following discussion const talkchess for rationality:
+ * See the following discussion in talkchess for rationality:
  *
  */
 struct SPRT {
@@ -229,7 +247,7 @@ public:
 	void setEngineNames(const string [2] engine) {
 		name[0] = engine[0];
 		name[1] = engine[1];
-	}		
+	}
 
 	/* record a new game */
 	void record(const int [2] result) {
@@ -256,8 +274,8 @@ public:
 		}
 		++n[s];
 
-		writeln(name[0], " vs ", name[1]);		
-		writefln("results: %d games", w + d + l);		
+		writeln(name[0], " vs ", name[1]);
+		writefln("results: %d games", w + d + l);
 		writefln("wdl:    w: %d, d: %d, l: %d", w, d, l);
 		writefln("pair:   0: %d, 0.5: %d, 1: %d, 1.5: %d, 2: %d", n[0], n[1], n[2], n[3], n[4]);
 	}
@@ -292,13 +310,13 @@ public:
 			writeln("Using variance of the pentanomial distribution of game pairs:");
 			end = LLR(var5());
 		}
-		
+
 		if (v & Var.trinomial) {
 			writeln("Using variance of the trinomial distribution of single games:");
 			end = LLR(var3());
 		}
 
-		return end; 
+		return end;
 	}
 }
 
@@ -341,7 +359,7 @@ public:
 		}
 		if (openings.length == 0) openings ~= new shared Game;
 		if (outputFile) output.open(outputFile, "w");
-		
+
 		sprt = SPRT(elo0, elo1, α, β);
 
 		foreach(i; 0 .. taskPool.size + 1) {
@@ -351,9 +369,9 @@ public:
 	}
 
 	/* start a pool of UCI engines */
-	void start() {
-		foreach (ref e; player) e.start();
-		foreach (ref e; opponent) e.start();
+	void start(const bool showDebug) {
+		foreach (ref e; player) e.start(showDebug);
+		foreach (ref e; opponent) e.start(showDebug);
 
 		sprt.setEngineNames([player[0].name, opponent[0].name]);
 	}
@@ -382,16 +400,17 @@ void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
 	int nGames = 30000, nCpu = 1;
-	bool showVersion, showHelp;
+	bool showVersion, showHelp, showDebug;
 	string [] engineName, openingFile;
 	string outputFile, var;
 	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05;
 	Var v = Var.all;
-	
+
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time,
 		"book|b", &openingFile, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
+		"debug|d", &showDebug);
 		"help|h", &showHelp, "version", &showVersion);
 
 	if (showVersion) writeln("tourney version 1.2\n© 2017 Richard Delorme");
@@ -410,6 +429,7 @@ void main(string [] args) {
 		writeln("    --alpha <alpha>          type I error (default = 0.05)");
 		writeln("    --beta  <beta>           type II error (default = 0.05)");
 		writeln("    --variance|-v <type>     none|3nomial|5nomial|all (default=all) ");
+		writeln("    --debug|-d               allow debugging by the engine to a log file");
 		writeln("    --help|-h                display this help");
 		writeln("    --version                show version number");
 		writeln("\nFor example:\n$ tourney -e amoeba-2.1 -e amoeba-2.0 -g 30000 -b opening.pgn -t 0.1 -n 3 -o game.pgn -v 5nomial");
@@ -440,7 +460,7 @@ void main(string [] args) {
 	engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
 
 	// run the tournament
-	engines.start();
+	engines.start(showDebug);
 	engines.loop(nGames, time, v);
 	engines.end();
 }
@@ -450,6 +470,5 @@ unittest {
 	sprt.w = 47; sprt.d = 356; sprt.l = 25;
 	sprt.n = [0, 15, 163, 35, 1];
 	sprt.stop(v);
-
 }
 
