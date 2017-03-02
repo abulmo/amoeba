@@ -410,8 +410,7 @@ void main(string [] args) {
 	getopt(args, "engine|e", &engineName, "time|t", &time,
 		"book|b", &openingFile, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
-		"debug|d", &showDebug);
-		"help|h", &showHelp, "version", &showVersion);
+		"debug|d", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
 	if (showVersion) writeln("tourney version 1.2\n© 2017 Richard Delorme");
 
