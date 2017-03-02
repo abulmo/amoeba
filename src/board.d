@@ -9,9 +9,6 @@ module board;
 import move, util;
 import std.algorithm, std.ascii, std.conv, std.format, std.getopt, std.math, std.random, std.stdio, std.string, std.uni;
 
-/* limits */
-enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256}
-
 /*
  * Color
  */
@@ -288,196 +285,12 @@ struct Mask {
 	ulong knight;                        // knight moves from x
 	ulong king;                          // king moves from x
 	ulong [Square.size] between;         // squares between x & y
-	ubyte [Square.size] direction;       // direction between x & y  
+	ubyte [Square.size] direction;       // direction between x & y
 	ubyte castling;                      // castling right
 }
 
-/* Bitmask init */
-private immutable(Mask[Square.size]) maskInit() {
-	int r, f, i, j, c, y, z;
-	byte [Square.size][Square.size] d;
-	Mask [Square.size] mask;
-	static immutable ubyte [6] castling = [13, 12, 14, 7, 3, 11];
-	static immutable Square [6] castlingX = [Square.a1, Square.e1, Square.h1, Square.a8, Square.e8, Square.h8];
-
-	foreach (x; Square.a1 .. Square.size) {
-
-		for (i = -1; i <= 1; ++i)
-		for (j = -1; j <= 1; ++j) {
-			if (i == 0 && j == 0) continue;
-			f = x & 07;
-			r = x >> 3;
-			for (r += i, f += j; 0 <= r && r < 8 && 0 <= f && f < 8; r += i, f += j) {
-		 		y = 8 * r + f;
-				d[x][y] = cast (byte) (8 * i + j);
-				mask[x].direction[y] = abs(d[x][y]);
-		 	}
-		}
-
-		for (y = 0; y < Square.size; ++y) {
-			i = d[x][y];
-			if (i) {
-				for (z = x + i; z != y; z += i) mask[x].between[y] |= 1UL << z;
-			}
-		}
-
-		mask[x].bit = 1UL << x;
-
-		for (y = x - 9; y >= 0 && d[x][y] == -9; y -= 9) mask[x].diagonal |= 1UL << y;
-		for (y = x + 9; y < Square.size && d[x][y] == 9; y += 9) mask[x].diagonal |= 1UL << y;
-
-		for (y = x - 7; y >= 0 && d[x][y] == -7; y -= 7) mask[x].antidiagonal |= 1UL << y;
-		for (y = x + 7; y < Square.size && d[x][y] == 7; y += 7) mask[x].antidiagonal |= 1UL << y;
-
-		for (y = x - 8; y >= 0; y -= 8) mask[x].file |= 1UL << y;
-		for (y = x + 8; y < Square.size; y += 8) mask[x].file |= 1UL << y;
-
-		f = x & 07;
-		r = x >> 3;
-		for (i = -1, c = 1; i <= 1; i += 2, c = 0) {
-			for (j = -1; j <= 1; j += 2) {
-				if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
-					 y = (r + i) * 8 + (f + j);
-					 mask[x].pawnAttack[c] |= 1UL << y;
-				}
-			}
-			if (0 <= r + i && r + i < 8) {
-				y = (r + i) * 8 + f;
-				mask[x].pawnPush[c] = 1UL << y;
-			}
-		}
-		for (i = -1, c = 1; i <= 1; i += 2, c = 0) {
-			for (y = 8 * (r + i) + f; 8 <= y && y < 56 ; y += i * 8) {
-				mask[x].openFile[c] |= 1UL << y;
-				if (f > 0) mask[x].passedPawn[c] |= 1UL << (y - 1);
-				if (f < 7) mask[x].passedPawn[c] |= 1UL << (y + 1);
-			}
-			for (y = 8 * (r - i) + f; 8 <= y && y < 56 ; y -= i * 8) {
-				if (f > 0) mask[x].backwardPawn[c] |= 1UL << (y - 1);
-				if (f < 7) mask[x].backwardPawn[c] |= 1UL << (y + 1);
-			}
-		}
-		if (f > 0) {
-			for (y = x - 1; y < 56; y += 8) mask[x].isolatedPawn |= 1UL << y;
-			for (y = x - 9; y >= 8; y -= 8) mask[x].isolatedPawn |= 1UL << y;
-		}
-		if (f < 7) {
-			for (y = x + 1; y < 56; y += 8) mask[x].isolatedPawn |= 1UL << y;
-			for (y = x - 7; y >= 8; y -= 8) mask[x].isolatedPawn |= 1UL << y;
-		}
-		if (r == 3 || r == 4) {
-			if (f > 0) mask[x].enpassant |=  1UL << x - 1;
-			if (f < 7) mask[x].enpassant |=  1UL << x + 1;
-		}
-
-		for (i = -2; i <= 2; i = (i == -1 ? 1 : i + 1))
-		for (j = -2; j <= 2; ++j) {
-			if (i == j || i == -j || j == 0) continue;
-			if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
-		 		y = 8 * (r + i) + (f + j);
-		 		mask[x].knight |= 1UL << y;
-			}
-		}
-
-		for (i = -1; i <= 1; ++i)
-		for (j = -1; j <= 1; ++j) {
-			if (i == 0 && j == 0) continue;
-			if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
-		 		y = 8 * (r + i) + (f + j);
-		 		mask[x].king |= 1UL << y;
-			}
-		}
-		mask[x].castling = 15;	
-	}
-
-	foreach (k; 0 .. 6) mask[castlingX[k]].castling = castling[k];
-
-	return mask;
-}
-
-private immutable(bool [Limits.moveSize][Piece.size]) legalInit() {
-	bool [Limits.moveSize][Piece.size] legal;
-
-	void set(const Piece p, const int f, const int t) { legal[p][(t << 6) | f] = true;}
-	
-	foreach (x; Square.a2 .. Square.a8) {
-		set(Piece.pawn, x, x + 8);
-		if (rank(x) == 1) set(Piece.pawn, x, x + 16);
-		if (file(x) < 7) set(Piece.pawn, x, x + 9);
-		if (file(x) > 0) set(Piece.pawn, x, x + 7);
-	}
-
-	foreach (x; Square.a1 .. Square.size) {
-		int f = file(x), r = rank(x);
-		int i, j;
-
-		foreach (c; Color.white .. Color.size) {
-			for (i = -2; i <= 2; ++i)
-			for (j = -2; j <= 2; ++j) {
-				if (i == 0 || i == j || i == -j || j == 0) continue;
-				if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
-			 		set(Piece.knight, x, toSquare(f + j, r + i));
-				}
-			}
-
-		for (i = f - 1, j = r - 1; i >= 0 && j >= 0; --i, --j) set(Piece.bishop, x, toSquare(i, j));
-		for (i = f + 1, j = r - 1; i <= 7 && j >= 0; ++i, --j) set(Piece.bishop, x, toSquare(i, j));
-		for (i = f - 1, j = r + 1; i >= 0 && j <= 7; --i, ++j) set(Piece.bishop, x, toSquare(i, j));
-		for (i = f + 1, j = r + 1; i <= 7 && j <= 7; ++i, ++j) set(Piece.bishop, x, toSquare(i, j));
-
-		for (i = f - 1; i >= 0; --i) set(Piece.rook, x, toSquare(i, r));
-		for (i = f + 1; i <= 7; ++i) set(Piece.rook, x, toSquare(i, r));
-		for (j = r - 1; j >= 0; --j) set(Piece.rook, x, toSquare(f, j));
-		for (j = r + 1; j <= 7; ++j) set(Piece.rook, x, toSquare(f, j));
-
-		for (i = f - 1, j = r - 1; i >= 0 && j >= 0; --i, --j) set(Piece.queen, x, toSquare(i, j));
-		for (i = f + 1, j = r - 1; i <= 7 && j >= 0; ++i, --j) set(Piece.queen, x, toSquare(i, j));
-		for (i = f - 1, j = r + 1; i >= 0 && j <= 7; --i, ++j) set(Piece.queen, x, toSquare(i, j));
-		for (i = f + 1, j = r + 1; i <= 7 && j <= 7; ++i, ++j) set(Piece.queen, x, toSquare(i, j));
-		for (i = f - 1; i >= 0; --i) set(Piece.queen, x, toSquare(i, r));
-		for (i = f + 1; i <= 7; ++i) set(Piece.queen, x, toSquare(i, r));
-		for (j = r - 1; j >= 0; --j) set(Piece.queen, x, toSquare(f, j));
-		for (j = r + 1; j <= 7; ++j) set(Piece.queen, x, toSquare(f, j));
-
-		for (i = f - 1; i <= f + 1; ++i)
-		for (j = r - 1; j <= r + 1; ++j) 
-			if (0 <= i && i <= 7 && 0 <= j && j <= 7 && toSquare(i, j) != x) set(Piece.king, x, toSquare(i, j));
-		}
-		set(Piece.king, Square.e1, Square.g1);
-		set(Piece.king, Square.e1, Square.c1);
-	}
-
-	return legal;
-}
-
-/* rank table init */
-private immutable(ubyte [512]) rankInit()  {
-	int x, y, o, f, b;
-	ubyte[512] r;
-
-	for (o = 0; o < 64; ++o) {
-		for (f = 0; f < 8; ++f) {
-			y = 0;
-			for (x = f - 1; x >= 0; --x) {
-				b = 1 << x;
-				y |= b;
-				if (((o << 1) & b) == b) break;
-			}
-			for (x = f + 1; x < 8; ++x) {
-				b = 1 << x;
-				y |= b;
-				if (((o << 1) & b) == b) break;
-			}
-			r[o * 8 + f] = cast (ubyte) y;
-		}
-	}
-
-	return r;
-}	
-
-
-/* 
- * Game result 
+/*
+ * Game result
  */
 enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, size}
 
@@ -570,10 +383,170 @@ private:
 	static immutable Castling [Color.size] queenside = [Castling.Q, Castling.q];
 	static immutable int [Piece.size] seeValue = [0, 1, 3, 3, 5, 9, 300];
 
+	/* constant initialisation at compile time */
 	shared static this() {
-		mask = maskInit();
-		ranks = rankInit();
-		legal = legalInit();
+		// mask
+		int r, f, i, j, y, z, b;
+		byte [Square.size][Square.size] d;
+		immutable ubyte [6] castling = [13, 12, 14, 7, 3, 11];
+		immutable Square [6] castlingX = [Square.a1, Square.e1, Square.h1, Square.a8, Square.e8, Square.h8];
+
+		foreach (x; Square.a1 .. Square.size) {
+			int c;
+
+			for (i = -1; i <= 1; ++i)
+			for (j = -1; j <= 1; ++j) {
+				if (i == 0 && j == 0) continue;
+				f = x & 07;
+				r = x >> 3;
+				for (r += i, f += j; 0 <= r && r < 8 && 0 <= f && f < 8; r += i, f += j) {
+			 		y = 8 * r + f;
+					d[x][y] = cast (byte) (8 * i + j);
+					mask[x].direction[y] = abs(d[x][y]);
+			 	}
+			}
+
+			for (y = 0; y < Square.size; ++y) {
+				i = d[x][y];
+				if (i) {
+					for (z = x + i; z != y; z += i) mask[x].between[y] |= 1UL << z;
+				}
+			}
+
+			mask[x].bit = 1UL << x;
+
+			for (y = x - 9; y >= 0 && d[x][y] == -9; y -= 9) mask[x].diagonal |= 1UL << y;
+			for (y = x + 9; y < Square.size && d[x][y] == 9; y += 9) mask[x].diagonal |= 1UL << y;
+
+			for (y = x - 7; y >= 0 && d[x][y] == -7; y -= 7) mask[x].antidiagonal |= 1UL << y;
+			for (y = x + 7; y < Square.size && d[x][y] == 7; y += 7) mask[x].antidiagonal |= 1UL << y;
+
+			for (y = x - 8; y >= 0; y -= 8) mask[x].file |= 1UL << y;
+			for (y = x + 8; y < Square.size; y += 8) mask[x].file |= 1UL << y;
+
+			f = x & 07;
+			r = x >> 3;
+			for (i = -1, c = 1; i <= 1; i += 2, c = 0) {
+				for (j = -1; j <= 1; j += 2) {
+					if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
+						 y = (r + i) * 8 + (f + j);
+						 mask[x].pawnAttack[c] |= 1UL << y;
+					}
+				}
+				if (0 <= r + i && r + i < 8) {
+					y = (r + i) * 8 + f;
+					mask[x].pawnPush[c] = 1UL << y;
+				}
+			}
+			for (i = -1, c = 1; i <= 1; i += 2, c = 0) {
+				for (y = 8 * (r + i) + f; 8 <= y && y < 56 ; y += i * 8) {
+					mask[x].openFile[c] |= 1UL << y;
+					if (f > 0) mask[x].passedPawn[c] |= 1UL << (y - 1);
+					if (f < 7) mask[x].passedPawn[c] |= 1UL << (y + 1);
+				}
+				for (y = 8 * (r - i) + f; 8 <= y && y < 56 ; y -= i * 8) {
+					if (f > 0) mask[x].backwardPawn[c] |= 1UL << (y - 1);
+					if (f < 7) mask[x].backwardPawn[c] |= 1UL << (y + 1);
+				}
+			}
+			if (f > 0) {
+				for (y = x - 1; y < 56; y += 8) mask[x].isolatedPawn |= 1UL << y;
+				for (y = x - 9; y >= 8; y -= 8) mask[x].isolatedPawn |= 1UL << y;
+			}
+			if (f < 7) {
+				for (y = x + 1; y < 56; y += 8) mask[x].isolatedPawn |= 1UL << y;
+				for (y = x - 7; y >= 8; y -= 8) mask[x].isolatedPawn |= 1UL << y;
+			}
+			if (r == 3 || r == 4) {
+				if (f > 0) mask[x].enpassant |=  1UL << x - 1;
+				if (f < 7) mask[x].enpassant |=  1UL << x + 1;
+			}
+
+			for (i = -2; i <= 2; i = (i == -1 ? 1 : i + 1))
+			for (j = -2; j <= 2; ++j) {
+				if (i == j || i == -j || j == 0) continue;
+				if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
+			 		y = 8 * (r + i) + (f + j);
+			 		mask[x].knight |= 1UL << y;
+				}
+			}
+
+			for (i = -1; i <= 1; ++i)
+			for (j = -1; j <= 1; ++j) {
+				if (i == 0 && j == 0) continue;
+				if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) {
+			 		y = 8 * (r + i) + (f + j);
+			 		mask[x].king |= 1UL << y;
+				}
+			}
+			mask[x].castling = 15;
+		}
+
+		foreach (k; 0 .. 6) mask[castlingX[k]].castling = castling[k];
+
+		// ranks
+		foreach (o; 0 .. 64) {
+			foreach (k; 0 .. 8) {
+				y = 0;
+				foreach_reverse (x; 0 .. k) {
+					b = 1 << x;
+					y |= b;
+					if (((o << 1) & b) == b) break;
+				}
+				foreach (x; k + 1 .. 8) {
+					b = 1 << x;
+					y |= b;
+					if (((o << 1) & b) == b) break;
+				}
+				ranks[o * 8 + k] = cast (ubyte) y;
+			}
+		}
+
+		// legal
+		foreach (x; Square.a2 .. Square.a8) {
+			legal[Piece.pawn][toMove(x, x + 8)] = true;
+			if (rank(x) == 1) legal[Piece.pawn][toMove(x, x + 16)] = true;
+			if (file(x) < 7) legal[Piece.pawn][toMove(x, x + 9)] = true;
+			if (file(x) > 0) legal[Piece.pawn][toMove(x, x + 7)] = true;
+		}
+
+		foreach (x; Square.a1 .. Square.size) {
+			f = file(x), r = rank(x);
+
+			foreach (c; Color.white .. Color.size) {
+				for (i = -2; i <= 2; ++i)
+				for (j = -2; j <= 2; ++j) {
+					if (i == 0 || i == j || i == -j || j == 0) continue;
+					if (0 <= r + i && r + i < 8 && 0 <= f + j && f + j < 8) legal[Piece.knight][toMove(x, toSquare(f + j, r + i))] = true;
+				}
+
+				for (i = f - 1, j = r - 1; i >= 0 && j >= 0; --i, --j) legal[Piece.bishop][toMove(x, toSquare(i, j))] = true;
+				for (i = f + 1, j = r - 1; i <= 7 && j >= 0; ++i, --j) legal[Piece.bishop][toMove(x, toSquare(i, j))] = true;
+				for (i = f - 1, j = r + 1; i >= 0 && j <= 7; --i, ++j) legal[Piece.bishop][toMove(x, toSquare(i, j))] = true;
+				for (i = f + 1, j = r + 1; i <= 7 && j <= 7; ++i, ++j) legal[Piece.bishop][toMove(x, toSquare(i, j))] = true;
+
+				for (i = f - 1; i >= 0; --i) legal[Piece.rook][toMove(x, toSquare(i, r))] = true;
+				for (i = f + 1; i <= 7; ++i) legal[Piece.rook][toMove(x, toSquare(i, r))] = true;
+				for (j = r - 1; j >= 0; --j) legal[Piece.rook][toMove(x, toSquare(f, j))] = true;
+				for (j = r + 1; j <= 7; ++j) legal[Piece.rook][toMove(x, toSquare(f, j))] = true;
+
+				for (i = f - 1, j = r - 1; i >= 0 && j >= 0; --i, --j) legal[Piece.queen][toMove(x, toSquare(i, j))] = true;
+				for (i = f + 1, j = r - 1; i <= 7 && j >= 0; ++i, --j) legal[Piece.queen][toMove(x, toSquare(i, j))] = true;
+				for (i = f - 1, j = r + 1; i >= 0 && j <= 7; --i, ++j) legal[Piece.queen][toMove(x, toSquare(i, j))] = true;
+				for (i = f + 1, j = r + 1; i <= 7 && j <= 7; ++i, ++j) legal[Piece.queen][toMove(x, toSquare(i, j))] = true;
+				for (i = f - 1; i >= 0; --i) legal[Piece.queen][toMove(x, toSquare(i, r))] = true;
+				for (i = f + 1; i <= 7; ++i) legal[Piece.queen][toMove(x, toSquare(i, r))] = true;
+				for (j = r - 1; j >= 0; --j) legal[Piece.queen][toMove(x, toSquare(f, j))] = true;
+				for (j = r + 1; j <= 7; ++j) legal[Piece.queen][toMove(x, toSquare(f, j))] = true;
+
+
+				for (i = f - 1; i <= f + 1; ++i)
+				for (j = r - 1; j <= r + 1; ++j)
+					if (0 <= i && i <= 7 && 0 <= j && j <= 7 && toSquare(i, j) != x) legal[Piece.king][toMove(x, toSquare(i, j))] = true;
+			}
+			legal[Piece.king][toMove(Square.e1, Square.g1)] = true;
+			legal[Piece.king][toMove(Square.e1, Square.c1)] = true;
+		}
 	}
 
 	/* can castle kingside ? */
@@ -720,15 +693,13 @@ private:
 		attack = attacker << 8 & piece[Piece.none];
 		static if (type != Generate.quiet) {
 			generatePromotions(moves, attack & Rank.r8 & empties, 8);
-		}
-		static if (type != Generate.capture) {
-			generatePawnMoves(moves, attack & ~Rank.r8 & empties, 8);
-			attack = ((attack & Rank.r3) << 8) & empties;
-			generatePawnMoves(moves, attack, 16);
-		} else {
 			generatePawnMoves(moves, attack & Rank.r7 & empties, 8);
 		}
-
+		static if (type != Generate.capture) {
+			generatePawnMoves(moves, attack & ~(Rank.r8 | Rank.r7) & empties, 8);
+			attack = ((attack & Rank.r3) << 8) & empties;
+			generatePawnMoves(moves, attack, 16);
+		}
 	}
 
 	/* generate all black pawn moves */
@@ -746,18 +717,17 @@ private:
 		attack = (attacker >> 8) & piece[Piece.none];
 		static if (type != Generate.quiet) {
 			generatePromotions(moves, attack & Rank.r1 & empties, -8);
+			generatePawnMoves(moves, attack & Rank.r2 & empties, -8);
 		}
 		static if (type != Generate.capture) {
-			generatePawnMoves(moves, attack & ~Rank.r1 & empties, -8);
+			generatePawnMoves(moves, attack & ~(Rank.r1 | Rank.r2) & empties, -8);
 			attack = ((attack & Rank.r6) >> 8) & empties;
 			generatePawnMoves(moves, attack, -16);
-		} else {
-			generatePawnMoves(moves, attack & Rank.r2 & empties, -8);
 		}
 	}
 
 public:
-	/* Coverage by a piece*/
+	/* Coverage by a piece */
 	static ulong coverage(Piece p)(const Square x, const ulong occupancy = 0, const Color c = Color.white) {
 		static if (p == Piece.pawn) return mask[x].pawnAttack[c]; // piece advance excluded!
 		else static if (p == Piece.knight) return mask[x].knight;
@@ -791,7 +761,7 @@ public:
 		foreach (x; Square.a1 .. Square.size) if (cpiece[x]) cpiece[x] = toCPiece(toPiece(cpiece[x]), opponent(toColor(cpiece[x])));
 		foreach (c; Color.white .. Color.size) xKing[c] ^= 56;
 		swap(xKing[0], xKing[1]);
-		
+
 		player = opponent(player);
 
 		foreach(i; 0 .. ply + 1) {
@@ -886,7 +856,7 @@ public:
 		foreach (x; Square.a1 .. Square.size) cpiece[x] = b.cpiece[x];
 		foreach (i; 0 .. cast (int) Limits.gameSize) stack[i] = b.stack[i];
 		foreach (c; Color.white .. Color.size) xKing[c] = b.xKing[c];
-		
+
 		player = b.player;
 		ply = b.ply; plyOffset = b.plyOffset;
 	}
@@ -1039,7 +1009,7 @@ public:
 		const ulong P = color[player] ^ mask[from].bit ^ mask[to].bit;
 		const int dir = mask[from].direction[k];
 		int check = 0;
-	
+
 		// direct check...
 		final switch(p) {
 		case Piece.pawn:
@@ -1070,17 +1040,17 @@ public:
 		else if ((dir == 1 || dir == 8) && attack!(Piece.rook)(k, P & (piece[Piece.rook] | piece[Piece.queen]), O)) ++check;
 
 		return check;
-	}		
+	}
 
 	/* move is an enpassant capture */
 	bool isEnpassant(const Move m) const {
 		return (stack[ply].enpassant == m.to && toPiece(cpiece[m.from]) == Piece.pawn);
 	}
-	
+
 
 	/* is a move a Capture or a promotion (enpassant capture are omitted) */
 	bool isTactical(const Move m) const {
-		return (cpiece[m.to] != CPiece.none || m.promotion /* || isEnpassant(m) */);
+		return (cpiece[m.to] != CPiece.none || (toPiece(cpiece[m.from]) == Piece.pawn && (rank(forward(m.to, player)) >= 6 || stack[ply].enpassant == m.to)));
 	}
 
 	/* Count the number of a piece */
@@ -1343,7 +1313,7 @@ public:
 					if (rank(forward(from, player)) == 6) moves.pushPromotions(from, to);
 					else moves.push(from, to);
 				}
-			} else if (d == abs(pawnPush)) {
+			} else if (type != Generate.capture && d == abs(pawnPush)) {
 				to = cast (Square) (from + pawnPush);
 			 	if (cpiece[to] == CPiece.none) {
 					moves.push(from, to);
@@ -1418,7 +1388,7 @@ public:
 		}
 
 		// player to move
-		if (player != Color.white && player != Color.black) return error(format("bad player", player));
+		if (player != Color.white && player != Color.black) return error(format("bad player %s", player));
 
 		// bitboard: 1 color per square
 		if (color[Color.white] & color[Color.black]) {
@@ -1520,10 +1490,10 @@ public:
 		Color enemy = opponent(player);
 		CPiece victim = cpiece[move.to];
 		bool inCheck;
-		enum Reason { none, wrongDeplacement, wrongColor, obstacle, blockedSquare, wrongCapture, missingPromotion, wrongPromotion, 
+		enum Reason { none, wrongDeplacement, wrongColor, obstacle, blockedSquare, wrongCapture, missingPromotion, wrongPromotion,
 			wrongVictim, illegalCastling, kingInCheck, illegalMissed }
 
-		bool fail(const Reason r) {		
+		bool fail(const Reason r) {
 			debug if (verbose) {
 				writeln(toString());
 				writeln(move.toPan(), " (", move, ")");
@@ -1559,13 +1529,13 @@ public:
 		// bad victim ?
 		if (victim && (toColor(victim) == player || toPiece(victim) == Piece.king)) return fail(Reason.wrongVictim);
 
-		// illegal castling ?	
+		// illegal castling ?
 		if (p == Piece.king) {
 			Square k = move.from;
-			if ((k == move.to - 2) && 
-				   (!canCastleKingside 
+			if ((k == move.to - 2) &&
+				   (!canCastleKingside
 				|| (~piece[Piece.none] & mask[k].between[k + 3])
-				|| isSquareAttacked(cast (Square) (k + 1), enemy) 
+				|| isSquareAttacked(cast (Square) (k + 1), enemy)
 				|| isSquareAttacked(cast (Square) (k + 2), enemy))) return fail(Reason.illegalCastling);
 			if ((k == move.to + 2) &&
 				   (!canCastleQueenside()
@@ -1595,7 +1565,7 @@ public:
 			piece[Piece.none] ^= mask[x].bit;
 		}
 		piece[Piece.none] ^= mask[move.to].bit | mask[move.from].bit;
-	
+
 		if (inCheck) return fail(Reason.kingInCheck);
 
 		debug {
@@ -1762,7 +1732,7 @@ unittest {
 
 	foreach (test; tests) {
 		write("Test ", test.comments); stdout.flush();
-		b.set(test.fen); 
+		b.set(test.fen);
 		claim(b.toFen()[0 .. test.fen.length] == test.fen);
 		claim(b.perft(test.depth) == test.result);
 		b.mirror();
