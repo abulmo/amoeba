@@ -306,10 +306,10 @@ private:
 					option.termination.time.extra += time;
 				} else if (message.has("stop")) {
 					stop = true;
-				}/+ else if (message.has("isready")) {
+				} else if (message.has("isready")) {
 					message.send("readyok");
 					message.peek();
-				}+/
+				}
 			}
 			if (!checkTime(option.termination.time.max)) stop = true;
 		}
