@@ -50,13 +50,13 @@ void init () {
 	foreach(x; Square.a1 .. Square.size) {
 		if (0 < rank(x) && rank(x) < 7) {
 			if (file(x) > 0) attacks[x].pawn |= bit(x + 7);
-			if (file(x) < 7) attacks[x].pawn |= bit(x + 9);			
+			if (file(x) < 7) attacks[x].pawn |= bit(x + 9);
 		}
 		for (int r = rank(x) - 1; r <= rank(x) + 1; ++r)
 		for (int f = file(x) - 1; f <= file(x) + 1; ++f) {
 			if (r == rank(x) && f == file(x)) continue;
 			if (0 <= r && r < 8 && 0 <= f && f < 8) attacks[x].king |= bit(8 * r + f);
-		}		
+		}
 	}
 	// initial setup: score obvious positions
 	foreach (int i; 0 .. size) {
@@ -69,7 +69,7 @@ void init () {
 			else if (rank(p) == 6 && p + 8 != bk && p + 8 != wk) { // promotions
 				if ((attacks[bk].king & bit(p + 8) & ~attacks[wk].king) == 0) result[i] = win; // safe
 			}
-		} else { // black king 
+		} else { // black king
 			if ((attacks[bk].king & bit(p) & ~attacks[wk].king) != 0) result[i] = draw; // pawn capture
 			if ((attacks[bk].king & ~(attacks[p].pawn | attacks[wk].king)) == 0) result[i] = draw; // stalemate
 		}
@@ -114,7 +114,7 @@ void init () {
 Value rescale(const Board b, const Value score) {
 	const ulong P = b.piece[Piece.pawn];
 	const ulong V = b.piece[Piece.none];
-	
+
 	if (countBits(P) == 1 && countBits(V) == 61) {
 		const ulong W = b.color[Color.white];
 		const ulong B = b.color[Color.black];
@@ -123,7 +123,7 @@ Value rescale(const Board b, const Value score) {
 		Square wk = firstSquare(K & W);
 		Square bk = firstSquare(K & B);
 		Color player = b.player;
-	
+
 		if ((P & B)) {
 			p ^= 56; bk ^= 56; wk ^= 56;
 			swap(bk, wk); player = opponent(player);
@@ -133,7 +133,7 @@ Value rescale(const Board b, const Value score) {
 		}
 
 		int i = getIndex(p, wk, bk, player);
-		
+
 		if (result[i] == win) return score * 4;
 		else return score / 16;
 	}
