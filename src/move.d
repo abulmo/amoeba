@@ -24,6 +24,11 @@ Square to(const Move move) @property {
 	return cast (Square) ((move >> 6) & 63);
 }
 
+/* to Move */
+Move toMove(const int from, const int to, const int promotion = Piece.none) {
+	return cast (Move) (promotion << 12 | to << 6 | from);
+}
+
 /* Promoted piece (if any) */
 Piece promotion(const Move move) @property {
 	return cast (Piece) ((move >> 12) & 7);
@@ -56,15 +61,16 @@ Move fromSan(string s, Board b) {
 	int i;
 	f = r = Square.none;
 
+	bool hasString(string t) {return  s.length >= t.length && s[0 .. t.length] == t; }
 	bool hasChar(const int j, char c) { return j < s.length && s[j] == c; }
 	bool hasAlpha(const int j) { return j < s.length && isAlpha(s[j]); }
 	bool hasDigit(const int j) { return j < s.length && isDigit(s[j]); }
 
-	if (s.length >= 5 && (s[0..5] == "O-O-O" || s[0..5] == "0-0-0")) {
+	if (hasString("O-O-O") || hasString("0-0-0")) {
 		from = b.xKing[b.player];
 		to = cast (Square) (from - 2);
 		p = Piece.king;
-	} else if (s.length >= 3 && (s[0..3] == "O-O" || s[0..3] == "0-0")) {
+	} else if (hasString("O-O") || hasString("0-0")) {
 		from = b.xKing[b.player];
 		to = cast (Square) (from + 2);
 		p = Piece.king;
@@ -98,6 +104,7 @@ Move fromSan(string s, Board b) {
 		}
 	}
 
+	//TODO: find the move without generating all of them
 	moves.generate(b);
 	foreach (m; moves) {
 		if (p == toPiece(b[m.from]) && to == m.to && promotion == m.promotion
@@ -153,10 +160,9 @@ string toSan(const Move move, Board board) {
 /*
  * Search history
  */
-
 struct History {
 	ushort [Square.size][CPiece.size] h;
-	enum max = 32768;
+	enum short max = 16384;
 	
 	void update(const Board board, const Move m, const uint δ) {
 		debug claim (board.isTactical(m) == false);
@@ -186,9 +192,9 @@ struct History {
  */
 struct MoveItem {
 	Move move;
-	int value;
+	short value;
 
-	this(const Move m, const int v) {
+	this(const Move m, const short v) {
 		move = m;
 		value = v;
 	}
@@ -212,13 +218,13 @@ private:
 	const(History) *history;
 	Stage stage;
 	
-	enum badSeeMalus = -History.max - vCapture[Piece.king];
+	enum short badSeeMalus = -History.max - vCapture[Piece.king];
 	static immutable short [Piece.size] vPiece = [0, 1, 2, 3, 4, 5, 6];
 	static immutable short [Piece.size] vPromotion = [0, 0, 48, 16, 32, 64, 0];
 	static immutable short [Piece.size] vCapture = [0, 256, 512, 768, 1024, 1280, 1536];
-	enum ttBonus = 10000;
-	enum killerBonus = 10;
-	enum doublon = int.min;
+	enum short ttBonus = 10000;
+	enum short killerBonus = 10;
+	enum short doublon = short.min;
 
 	/* select the best move according to its value */
 	void selectValuableMove() {
@@ -245,8 +251,8 @@ private:
 			else {
 				auto p = toPiece(board[m.from]);
 				auto victim = toPiece(board[m.to]);			
-				i.value = vCapture[victim] + vPromotion[m.promotion] - vPiece[p];
-				if (i.value == -vPiece[Piece.pawn]) i.value += vCapture[Piece.pawn]; // en passant
+				i.value = cast (short) (vCapture[victim] + vPromotion[m.promotion] - vPiece[p]);
+				if (i.value == -vPiece[Piece.pawn] && board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
 				if ((board.see(m) < 0 && board.giveCheck(m) < 2) || (m.promotion > Piece.pawn && m.promotion < Piece.queen)) {
 					if (captureOnly) i.value = doublon;
 					else i.value += badSeeMalus;
@@ -266,9 +272,7 @@ private:
 			else if (i.move == killer[0]) i.value = doublon;
 			else if (i.move == killer[1]) i.value = doublon;
 			else if (i.move == refutation) i.value = doublon;
-			else {
-				i.value = history.value(board[i.move.from], i.move.to);
-			}
+			else i.value = history.value(board[i.move.from], i.move.to);
 		}
 		item[n] = MoveItem.init;
 	}
@@ -283,7 +287,7 @@ private:
 				auto p = toPiece(board[i.move.from]);
 				auto victim = toPiece(board[i.move.to]);			
 				if (victim || i.move.promotion) {
-					i.value = vCapture[victim] + vPromotion[i.move.promotion] - vPiece[p];
+					i.value = cast (short) (vCapture[victim] + vPromotion[i.move.promotion] - vPiece[p]);
 					if (board.see(i.move) < 0 && board.giveCheck(i.move) < 2) i.value += badSeeMalus;
 				} else {
 					i.value = (p == Piece.king) ? 1 : -vPiece[p];
@@ -398,10 +402,35 @@ public:
 			}
 			break;
 		}
+		debug claim(verify(board));
 
 		return item[index++];
 	}
 
+	/* verify that te current move is legal and has not been played yet */
+	bool verify(Board board) const {
+		Move m = item[index].move;
+		int v = item[index].value;
+
+		bool error(string msg) {
+			stderr.writeln(board);
+			stderr.writeln("Move: ", m.toPan(), " (", v, ") ", msg);
+			dump(stderr);
+			return false;
+		}
+
+		if (index == n && m == 0) return true;
+		
+		if (!m) return error(" is null");
+		if (v == doublon) return error(" has doublon value");
+		if (v > ttBonus || v < badSeeMalus - vPiece[Piece.pawn]) return error(" unexpected value");
+		if (!board.isLegal(m)) return error("is illegal");
+		foreach (i; item[0 .. index]) {
+			if (i.move == m) return error(" is a doublon");
+		}
+		return true;
+	}
+	
 	/* length of the array */
 	size_t length() const @property {
 		return n;
@@ -438,7 +467,7 @@ public:
 
 	/* append a move built from origin & destination squares */
 	void push(const Square from, const Square to) {
-		item[n++].move = (from | to << 6);
+		item[n++].move = toMove(from, to);
 	}
 
 	/* append a move */
@@ -448,10 +477,10 @@ public:
 
 	/* append promotions from origin & destination squares */
 	void pushPromotions(const Square from, const Square to) {
-		item[n++].move = (from | to << 6 | Piece.queen << 12);
-		item[n++].move = (from | to << 6 | Piece.knight << 12);
-		item[n++].move = (from | to << 6 | Piece.rook << 12);
-		item[n++].move = (from | to << 6 | Piece.bishop << 12);
+		item[n++].move = toMove(from, to, Piece.queen);
+		item[n++].move = toMove(from, to, Piece.knight);
+		item[n++].move = toMove(from, to, Piece.rook);
+		item[n++].move = toMove(from, to, Piece.bishop);
 	}
 
 	/* generate all moves */
@@ -476,12 +505,12 @@ public:
 	}
 
 	/* dump */
-	void dump() const {
-		foreach (ref i; item[0 .. n]) write(i.move.toPan(), " [", i.value, "], ");
-		writeln();
-		writeln("stage = ", stage, " index = ", index, " n = ", n);
-		writeln("ttMove = ", ttMove[0].toPan, ", ", ttMove[1].toPan);
-		writeln("killer = ", killer[0].toPan, ", ", killer[1].toPan, " ; refutation = ", refutation.toPan);
+	void dump(std.stdio.File f = stdout) const {
+		foreach (ref i; item[0 .. n]) f.write(i.move.toPan(), " [", i.value, "], ");
+		f.writeln();
+		f.writeln("stage = ", stage, " index = ", index, " n = ", n);
+		f.writeln("ttMove = ", ttMove[0].toPan, ", ", ttMove[1].toPan);
+		f.writeln("killer = ", killer[0].toPan, ", ", killer[1].toPan, " ; refutation = ", refutation.toPan);
 
 	}
 
