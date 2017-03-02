@@ -5,7 +5,7 @@
  */
 
 import board, move, util;
-import std.algorithm, std.stdio, std.string, std.uni;
+import std.algorithm, std.format, std.math, std.stdio, std.string, std.uni;
 import core.atomic;
 
 /*
@@ -19,7 +19,7 @@ struct Reader {
 
 	/* open a file to read */
 	void open(string fileName) {
-		file.open(fileName, "r");	
+		file.open(fileName, "r");
 		writeln("reading ", fileName);
 	}
 
@@ -45,7 +45,7 @@ struct Reader {
 		return skip || file.isOK();
 	}
 }
-	
+
 
 /*
  * PGN tag
@@ -63,7 +63,7 @@ private:
 
 	/* get the value of the tag */
 	static string getValue(string line) {
-		size_t a = 1, b = line.length - 1;		
+		size_t a = 1, b = line.length - 1;
 		foreach (i; 1 .. line.length) {
 			if (line[i] == '"') {
 				a = i + 1;
@@ -105,16 +105,16 @@ public:
 		file.writeln("[", name, " \"", value, "\"]");
 	}
 }
-	
-/* 
+
+/*
  * Game
  */
 shared class Game {
 	struct Info {
-		float time;
-		short score;
-		ubyte depth;
-		bool book;
+		float time = 0.0;
+		short score = 0;
+		ubyte depth = 0;
+		bool book = false;
 	}
 private:
 	/* skip spaces */
@@ -150,7 +150,7 @@ private:
 		}
 
 		return text[i .. $];
-	}	
+	}
 
 	/* skip comment */
 	string skipComment(ref string text) {
@@ -165,21 +165,45 @@ private:
 		return text[i .. $];
 	}
 
-	/* skip comment */
-	string readComment(ref string text) {
-		size_t i;
+	/* read thinking comment of the form {score/depth time} */
+	Info readInfo(ref string text) {
+		size_t b;
+		Info i = {0.0, 0, 0, false};
+		int matein, depth;
+		double score, time;
+		string s;
 
-		text = skipSpaces(text);
-		if (text[i] == '{') {
-			while (++i < text.length && text[i] != '}') {}
-			if (text[i] == '}') ++i;
+
+		text = text.strip();
+		if (text[b] == '{') {
+			while (++b < text.length && text[b] != '}') {}
+			if (text[b] == '}') ++b;
+
+			s = text[1 .. b].strip();
+			text = text[b .. $];
+
+			if (s == "book") i.book = true;
+			else {
+				if (formattedRead(s, "%s/%s %s",&score, &depth, &time) == 3) {
+				} else if (s[1] == 'M') {
+					s = s[2 .. $];
+					if (formattedRead(s, "%s/%s %s",&matein, &depth, &time) == 3) {
+						if (s[0] == '-') matein = -matein;
+					} else return i;
+				}
+				if (matein > 0) i.score = cast (short) (Score.mate - matein);
+				else if (matein < 0) i.score = cast (short) (matein - Score.mate);
+				else i.score = cast (short) (100 * score);
+				i.depth = cast (ubyte) max(0, min(255, depth));
+				i.time = cast (float) time;
+			}
 		}
 
-		return text[i .. $];
+		return i;
 	}
 
 	/* read a move */
-	Move getMove(ref string text, Board board) {
+	Move readMove(ref string text, Board board) {
 		size_t a, b;
 		Move m;
 
@@ -225,6 +249,7 @@ public:
 		clear();
 		tags = g.tags.dup;
 		moves = g.moves.dup;
+		infos = g.infos.dup;
 	}
 
 	/* copy constructor */
@@ -236,26 +261,29 @@ public:
 	void clear() {
 		tags.length = 0;
 		moves.length = 0;
+		infos.length = 0;
 		result = Result.none;
 	}
 
 	/* append a move */
-	void push(const Move m) {
+	void push(const Move m, const Info i = Info.init) {
 		moves ~= m;
-	}	
-	
+		infos ~= i;
+	}
+
 	/* append a tag */
 	void push(string name, string value) {
 		Tag t;
 		t.name = name; t.value = value;
 		tags ~= t;
-	}	
+	}
 
 	/* read a game from a simple PGN (no #annotation field) */
 	void read(ref Reader reader) {
 		string line, text;
-		string word; 
+		string word;
 		Move m;
+		Info i;
 		Board board = new Board;
 		Result r;
 		Tag tag;
@@ -270,7 +298,7 @@ public:
 			else if (tag.name == "Result") toResult(tag.value, result);
 		}
 
-		// read the sequence of moves	
+		// read the sequence of moves
 		while (true) {
 			line = reader.read();
 			if (line is null) break;
@@ -279,7 +307,7 @@ public:
 				break;
 			} else text ~= line.chomp() ~ " ";
 		}
-	
+
 		// interpret it
 		while (text.length > 0) {
 			text = skipComment(text);
@@ -289,11 +317,14 @@ public:
 				if (r != result) throw new Exception("Inconsistant result ?");
 				return;
 			} else { // read a move ?
-				m = getMove(text, board);
-				push(m);
+				m = readMove(text, board);
+				i = readInfo(text);
+				push(m, i);
 				board.update(m);
 			}
 		}
+
+		claim(infos.length == moves.length);
 	}
 
 	/* write a game */
@@ -303,6 +334,8 @@ public:
 		string text;
 		bool hasResult;
 
+		claim(infos.length == moves.length);
+
 		// tags
 		foreach (t; tags) {
 			t.write(f);
@@ -310,12 +343,18 @@ public:
 			else if (t.name == "Result" && t.value == result.fromResult!false()) hasResult = true;
 		}
 
-		// game 
+		// game
 		if (board.player == Color.black) text = format("%d... ", ply(board));
-		foreach (m; moves) {
+		foreach (i ; 0 .. moves.length) {
 			if (board.player == Color.white) text ~= format("%d. ", ply(board));
-			text ~= toSan(m, board) ~ ' ';
-			board.update(m);
+			text ~= toSan(moves[i], board) ~ ' ';
+			if (i < infos.length) {
+				if (infos[i].book) text ~= "{book} ";
+				else if (infos[i].score > Score.high) text ~= format("{+M%d/%s %.3f} ", Score.mate - infos[i].score, infos[i].depth, infos[i].time);
+				else if (infos[i].score < Score.low) text ~= format("{-M%d/%s %.3f} ", Score.mate + infos[i].score, infos[i].depth, infos[i].time);
+				else if (infos[i].depth > 0) text ~= format("{%.2f/%s %.3f} ", 0.01 * infos[i].score, infos[i].depth, infos[i].time);
+			}
+			board.update(moves[i]);
 		}
 		if (!hasResult) {
 			result = board.isGameOver;
@@ -333,6 +372,7 @@ public:
 			}
 		}
 		if (a < text.length) f.writeln(text[a .. $]);
+		f.flush();
 	}
 }
 
@@ -366,7 +406,7 @@ shared class GameBase {
 		string line;
 		static if (!pgn) {
 			string fen;
-			Board b = new Board;	
+			Board b = new Board;
 		}
 
 		r.open(fileName);
@@ -382,7 +422,7 @@ shared class GameBase {
 					fen = b.toFen();
 					g.push("FEN", fen);
 					g.push("SetUp", "1");
-				}		
+				}
 				n += g.moves.length;
 			} catch (Exception e) {
 				static if (pgn) {
@@ -390,7 +430,7 @@ shared class GameBase {
 					stderr.writeln("moves: ", g.moves);
 				} else {
 					stderr.writeln("bad fen:", e);
-				}	
+				}
 				break;
 			}
 			if (g.moves.length >= minimalLength) games ~= g;
