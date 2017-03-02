@@ -7,7 +7,10 @@
 module uci;
 
 import board, eval, move, search, util;
-import std.algorithm, std.array, std.conv, std.concurrency, std.process, std.stdio, std.string;
+import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
+
+/* version */
+enum string versionNumber="2.2";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -24,9 +27,9 @@ string arch() @property {
 	return a;
 }
 
-/* spawnable event loop function */
-void eventLoop(shared Event e) {
-	e.loop();
+/* spawnable message loop function */
+void messageLoop(shared util.Message m) {
+	m.loop();
 }
 
 /* uci class */
@@ -41,8 +44,7 @@ class Uci {
 	Search search;
 	Board board;
 	Moves moves;
-	shared Event event;	
-	std.stdio.File log;
+	shared util.Message message;	
 	Chrono chrono;
 	Time [Color.size] time;
 	int depthMax, movesToGo, multipv;
@@ -52,25 +54,15 @@ class Uci {
 	/* constructor */
 	this() {
 		chrono.start();
-		name = "Amoeba 2.2" ~ arch;
+		name = "Amoeba " ~ versionNumber ~ '.' ~ arch;
 		search = new Search;
-		search.event = event = new shared Event;
+		search.message = message = new shared util.Message(name);
 		board = new Board;
 		ucinewgame();
 		canPonder = false;
 		search.option.verbose = true;
 		multipv = 1;
 		easy = true;
-	}
-
-	/* send */
-	void send(T...) (T args) {
-		writeln(args);
-		if (log.isOpen) {
-			log.writef("[%8.3f] %s> ", chrono.time(), name);
-			log.writeln(args);
-		}
-		stdout.flush();
 	}
 
 	/* set thinking time */
@@ -107,15 +99,15 @@ class Uci {
 
 	/* uci command */
 	void uci() {
-		send("id name " ~ name);
-		send("id author Richard Delorme");
-		send("option name Ponder type check default false");
-		send("option name Hash type spin default 64 min 1 max 4096");
-		send("option name Log type check default false");
-		send("option name MultiPV type spin default 1 min 1 max 256");
-		send("option name UCI_AnalyseMode type check default false");
+		message.send("id name " ~ name);
+		message.send("id author Richard Delorme");
+		message.send("option name Ponder type check default false");
+		message.send("option name Hash type spin default 64 min 1 max 4096");
+		message.send("option name Log type check default true");
+		message.send("option name MultiPV type spin default 1 min 1 max 256");
+		message.send("option name UCI_AnalyseMode type check default false");
 		// add more options here...
-		send("uciok");
+		message.send("uciok");
 	}
 
 	/* setoption command */
@@ -128,12 +120,8 @@ class Uci {
 		else if (name == "multipv") multipv = to!int(value);
 		else if (name == "uci_analysemode") easy = !to!bool(value);
 		else if (name == "log") {
-			if (to!bool(value)) {
-				log.open(name ~ "-" ~ to!string(thisProcessID) ~ ".log", "w");
-				search.logFile = log;
-			} else {
-				if (log.isOpen) log.close();
-			}
+			if (to!bool(value)) message.logOn();
+			else message.logOff();
 		}
 			
 	}
@@ -166,8 +154,8 @@ class Uci {
 
 	/* set bestmove */
 	void bestmove() {
-		if (search.hint != 0 && canPonder) send("bestmove ", search.bestMove.toPan(), " ponder ", search.hint.toPan());
-		else send("bestmove ", search.bestMove.toPan());
+		if (search.hint != 0 && canPonder) message.send("bestmove ", search.bestMove.toPan(), " ponder ", search.hint.toPan());
+		else message.send("bestmove ", search.bestMove.toPan());
 	}
 
 	/* go */
@@ -211,11 +199,7 @@ class Uci {
 		string [] words = line.split();
 		foreach(i, ref w ; words) {
 			if (w == "board") writeln(board);
-			else if (w == "moves") {
-				Moves moves;
-				moves.generate(board);
-				writeln(moves);
-			}
+			else if (w == "moves") search.showMoves();
 			else if (w == "search") search.showSetting();
 			else if (w == "eval") search.eval.show(board);
 			else if (w == "weights") search.eval.showWeight();
@@ -225,15 +209,14 @@ class Uci {
 
 	/* main loop */
 	void loop(const bool readStdin = true) {
-		if (readStdin) spawn(&eventLoop, event);
+		if (readStdin) spawn(&messageLoop, message);
 		while (true) {
-			auto line = event.wait();
-			if (log.isOpen) log.writefln("[%8.3f] uci> %s", chrono.time(), line);
+			auto line = message.retrieve();
 			if (line == null) break;
 			else if (line == "" || line[0] == '#') continue;
 			else if (findSkip(line, "ucinewgame")) ucinewgame();
 			else if (findSkip(line, "uci")) uci();
-			else if (findSkip(line, "isready")) send("readyok");
+			else if (findSkip(line, "isready")) message.send("readyok");
 			else if (findSkip(line, "setoption")) setoption(line);
 			else if (findSkip(line, "position")) position(line);
 			else if (findSkip(line, "go")) go(line);
@@ -244,12 +227,9 @@ class Uci {
 			else if (findSkip(line, "debug")) {}
 			else if (findSkip(line, "register")) {}
 			// extension
-			else if (findSkip(line, "perft")) perft(line.split, board);
 			else if (findSkip(line, "show")) show(line);
-			else if (log.isOpen) log.writeln("error> unknown command: %s", line);
-		}
-		if (log.isOpen) {
-			log.close();
+			else if (findSkip(line, "perft")) perft(("perft " ~ line).split, board);
+			else message.log("error unknown command: '%s'", line);
 		}
 	}
 }
@@ -258,28 +238,28 @@ class Uci {
 unittest {
 	stderr.writeln("Testing uci protocol");
 	Uci uci = new Uci();
-	uci.event.push("uci");
-	uci.event.push("ucinewgame");
-	uci.event.push("position startpos moves e2e4");
-	uci.event.push("show board");
-	uci.event.push("show moves");
-	uci.event.push("show weights");
-	uci.event.push("show eval");
-	uci.event.push("isready");
-	uci.event.push("go depth 15");
-	uci.event.push("show search");
-	uci.event.push("position fen 8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - -");
-	uci.event.push("show board");
-	uci.event.push("show moves");
-	uci.event.push("show eval");
-	uci.event.push("go movetime 15000");
-	uci.event.push("show search");
-	uci.event.push("position fen 8/k7/3n4/1Q6/8/8/8/K7 b - -");
-	uci.event.push("show board");
-	uci.event.push("show moves");
-	uci.event.push("show eval");
-	uci.event.push("go btime 1000 binc 100");
-	uci.event.push("quit");
+	uci.message.push("uci");
+	uci.message.push("ucinewgame");
+	uci.message.push("position startpos moves e2e4");
+	uci.message.push("show board");
+	uci.message.push("show moves");
+	uci.message.push("show weights");
+	uci.message.push("show eval");
+	uci.message.push("isready");
+	uci.message.push("go depth 15");
+	uci.message.push("show search");
+	uci.message.push("position fen 8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - -");
+	uci.message.push("show board");
+	uci.message.push("show moves");
+	uci.message.push("show eval");
+	uci.message.push("go movetime 15000");
+	uci.message.push("show search");
+	uci.message.push("position fen 8/k7/3n4/1Q6/8/8/8/K7 b - -");
+	uci.message.push("show board");
+	uci.message.push("show moves");
+	uci.message.push("show eval");
+	uci.message.push("go btime 1000 binc 100");
+	uci.message.push("quit");
 	uci.loop(false);
 }
 
