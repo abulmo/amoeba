@@ -6,11 +6,16 @@
  */
 
 module util;
-import std.array, std.datetime, std.format, std.stdio, std.string;
+import std.array, std.conv, std.datetime, std.format, std.process, std.stdio, std.string;
 import core.bitop, core.simd, core.time, core.thread, core.stdc.stdlib;
 
 version (LDC) import ldc.intrinsics;
 else version (GNU) import gcc.builtins;
+
+/* limits */
+enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256}
+
+enum Score {mate = 30000, low = -29000, high = 29000, big = 3000}
 
 /*
  * bit utilities
@@ -87,12 +92,12 @@ void prefetch(void *v) {
 }
 
 
-/* 
+/*
  * struct Chrono
  */
 struct Chrono {
 	private {
-		TickDuration tick;
+		__gshared TickDuration tick;
 		bool on;
 	}
 
@@ -117,29 +122,36 @@ struct Chrono {
 	}
 }
 
+int millisecond(const ref SysTime t) {
+	int msecs;
+	t.fracSecs.split!("msecs")(msecs);
+	return msecs;
+}
+
 /* return the current date */
 string date() {
 	SysTime t = Clock.currTime();
 	return format("%d.%d.%d", t.year, t.month, t.day);
 }
 
+/* return the current hour */
+string hour() {
+	SysTime t = Clock.currTime();
+	return format("%0d:%0d:%0d.%03d", t.hour, t.minute, t.second, t.millisecond);
+}
+
 
 /*
- * class Event
+ * class Message
  */
-shared class Event {
-	private:
+shared class Message {
+private:
 	string [] ring;
 	size_t first, last;
 	class Lock {};
 	Lock lock;
-
-	public:
-	/* constructor */
-	this () {
-		ring.length = 4;
-		lock = new shared Lock;
-	}
+	string header;
+	__gshared File logFile;
 
 	/* ring is empty */
 	bool empty() const @property {
@@ -149,6 +161,13 @@ shared class Event {
 	/* ring is full */
 	bool full() const @property {
 		return first == (last + 1)  % ring.length;
+	}
+public:
+	/* constructor */
+	this (string h = "") {
+		ring.length = 4;
+		lock = new shared Lock;
+		header = h;
 	}
 
 	/* push a new event to the ring */
@@ -173,13 +192,17 @@ shared class Event {
 				s = ring[first];
 				ring[first] = null;
 				first = (first  + 1) % ring.length;
+				if (logFile.isOpen) {
+					logFile.writefln("[%s %s] %s< %s", date(), hour(), header, s);
+					logFile.flush();
+				}
 			}
 			return s;
 		}
 	}
 
 	/* wait for an event */
-	string wait() {
+	string retrieve() {
 		while (empty) Thread.sleep(1.msecs);
 		return peek();
 	}
@@ -196,6 +219,36 @@ shared class Event {
 			line = readln().chomp();
 			push(line);
 		} while (line != "quit" && stdin.isOpen);
+	}
+
+	/* send */
+	void send(T...) (T args) {
+		stdout.writeln(args);
+		stdout.flush();
+		if (logFile.isOpen) {
+			logFile.writef("[%s %s] %s> ", date(), hour(), header);
+			logFile.writeln(args);
+			logFile.flush();
+		}
+	}
+
+	/* log */
+	void log(T...) (T args) {
+		if (logFile.isOpen) {
+			logFile.writef("[%s %s] %s# ", date(), hour(), header);
+			logFile.writeln(args);
+			logFile.flush();
+		}
+	}
+
+	/* turn on logging for debugging purpose */
+	void logOn() {
+		logFile.open(header ~ "-" ~ to!string(thisProcessID) ~ ".log", "w");		
+	}
+
+	/* turn off logging for debugging purpose */
+	void logOff() {
+		if (logFile.isOpen) logFile.close();
 	}
 }
 
@@ -230,7 +283,7 @@ bool isOK(const std.stdio.File f) @property {
 
 
 /*
- * Unit test 
+ * Unit test
  */
 unittest {
 	claim(stdout.isOK);
