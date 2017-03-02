@@ -93,7 +93,7 @@ final class TranspositionTable {
 			mask = l - 1;
 			entry.length = mask + bucketSize;
 		}
-		debug writefln("size: %s -> lMax: %s, l: %s mask: %s, entry.length: %s -> size: %s", size, lMax, l, mask, entry.length, entry.length * Entry.sizeof);
+		debug writefln("size: %s -> mask: %s, entry.length: %s -> size: %s", size, mask, entry.length, entry.length * Entry.sizeof);
 	}
 
 	/* clear the table */
@@ -163,7 +163,7 @@ struct Termination {
 	}
 	Time time;
 	Nodes nodes;
-	Depth depth;				
+	Depth depth;
 }
 
 
@@ -182,15 +182,19 @@ private:
 		bool isPondering;
 		bool verbose;
 
-		void show() {
-			writeln("Search setting:");
-			writefln("\t Time: max: %.3fs, extra: %.3fs", termination.time.max, termination.time.extra);
-			writefln("\tNodes: max: %d", termination.nodes.max);
-			writefln("\tDepth: max: %d", termination.depth.max);
-			writefln("\tMultiPv: %d", multiPv);
-			writefln("\teasy: %d", easy);
-			writefln("\tisPondering: %d", isPondering);
-			writefln("\tverbose: %d", verbose);
+		string toString() const {
+			string s;
+
+			s = "Search setting:";
+			s ~= "\n\t Time: max: " ~ to!string(termination.time.max) ~ " s, extra:" ~ to!string(termination.time.extra);
+			s ~= " s\n\tNodes: max: " ~ to!string(termination.nodes.max);
+			s ~= "\n\tDepth: max: " ~ to!string(termination.depth.max);
+			s ~= "\n\tMultiPv: " ~ to!string(multiPv);
+			s ~= "\n\teasy: " ~ to!string(easy);
+			s ~= "\n\tisPondering: " ~ to!string(isPondering);
+			s ~= "\n\tverbose: " ~ to!string(verbose);
+
+			return s;
 		}
 	}
 
@@ -212,7 +216,7 @@ private:
 		void store(const int iPv, int s, ref Line p) {
 			const Move m = p.move[0];
 			foreach (i; iPv + 1 .. multiPv) {
-				if (m == pv[i].move[0]) {					
+				if (m == pv[i].move[0]) {
 					foreach_reverse (j; iPv .. i + 1) {
 						score[j + 1] = score[j];
 						pv[j + 1].set(pv[j]);
@@ -230,7 +234,7 @@ private:
 				pv[j].swap(pv[j + 1]);
 			}
 		}
-		
+
 		/* clear results */
 		void clear(const size_t n, const int scoreInit) {
 			nNodes = 0; depth = 0; time = 0.0;
@@ -240,23 +244,30 @@ private:
 				pv[i].clear();
 			}
 			score[0] = scoreInit;
-		}	
+		}
 
-		/* write the search result so far using UCI protocol */
-		void writeUCI(const int iPv, std.stdio.File f=stdout) const {
-			auto t = 1000 * time;
-			auto speed = nNodes / time;
+		/* write the search results found so far using UCI protocol */
+		string toUCI(const int iPv) const {
+			ulong t = cast (ulong) (1000 * time);
+			ulong speed = cast (ulong) (nNodes / time);
+			string s;
+
 			foreach (i; 0 .. multiPv) {
 				auto d = depth - (i > iPv);
-				f.write("info depth ", d);
-				if (multiPv > 1) f.write(" multipv ", i + 1);
-				f.write(" score ");
-				if (score[i] > Score.high) f.write("mate ", (Score.mate + 1 - score[i]) / 2);
-				else if (score[i] < -Score.high) f.write("mate ", -(Score.mate + score[i]) / 2);
-				else f.write("cp ", score[i]);
-				f.writefln(" nps %.0f time %.0f nodes %s pv %s", speed, t, nNodes, pv[i]);
+				s = "info depth " ~ to!string(d);
+				if (multiPv > 1) s ~= " multipv " ~ to!string(i + 1);
+				s ~= " score ";
+				if (score[i] > Score.high) s ~= "mate " ~ to!string((Score.mate + 1 - score[i]) / 2);
+				else if (score[i] < Score.low) s ~= "mate " ~ to!string(-(Score.mate + score[i]) / 2);
+				else s ~= "cp " ~ to!string(score[i]);
+				s ~=  " nps " ~ to!string(cast (ulong) (nNodes / time));
+				s ~= " time " ~ to!string(cast (ulong) (1000 * time));
+				s ~= " nodes " ~ to!string(nNodes);
+				s ~= " pv " ~ pv[i].toString();
+				if (i + 1 < multiPv) s ~= '\n';
 			}
-			f.flush();
+
+			return s;
 		}
 	}
 	Board board;
@@ -275,16 +286,10 @@ private:
 
 public:
 	Eval eval;
-	shared Event event;
+	shared Message message;
 	Option option;
-	std.stdio.File logFile;
 
 private:
-	/* (simple) logging */
-	void log(T...)  (string fmt, T args) {
-		if (logFile.isOpen) logFile.writefln(fmt, args);
-	}
-
 	/* check if enough time is available */
 	bool checkTime(const double timeMax) const {
 		return option.isPondering || time < timeMax;
@@ -293,17 +298,18 @@ private:
 	/* check if the search should abort or continue */
 	bool abort() {
 		if ((nNodes & 0x3ff) == 0) {
-			if (event) {
-				if (option.isPondering && event.has("ponderhit")) {
+			if (message) {
+				if (option.isPondering && message.has("ponderhit")) {
 					option.isPondering = false;
-					log("ponderhit> time: %.3f ; timeMax: %.3f ⭢ %.3f", time, option.termination.time.max, time + option.termination.time.max);
+					message.log("ponderhit> time: %.3f ; timeMax: %.3f ⭢ %.3f", time, option.termination.time.max, time + option.termination.time.max);
 					option.termination.time.max += time;
 					option.termination.time.extra += time;
-				} else if (event.has("stop")) {
+				} else if (message.has("stop")) {
 					stop = true;
-				} else if (event.has("isready")) {
-					writeln("readyok"); event.peek();
-				}
+				}/+ else if (message.has("isready")) {
+					message.send("readyok");
+					message.peek();
+				}+/
 			}
 			if (!checkTime(option.termination.time.max)) stop = true;
 		}
@@ -358,7 +364,7 @@ private:
 	int qs(int α, int β) {
 		enum δ = 200;
 		const bool isPv = (α + 1 < β);
-		int s, bs, v = Score.mate; 
+		int s, bs, v = Score.mate;
 		Moves moves = void;
 		Move m;
 		Entry h;
@@ -373,7 +379,7 @@ private:
 		bs = ply - Score.mate;
 		if (bs > α && (α = bs) >= β) return bs;
 		s = Score.mate - ply - 1;
-		if (s < β && (β = s) <= α) return s;			
+		if (s < β && (β = s) <= α) return s;
 
 		// transposition table probe
 		if (tt.probe(board.key, h)) {
@@ -442,7 +448,7 @@ private:
 		bs = ply - Score.mate;
 		if (bs > α && (α = bs) >= β) return bs;
 		s = Score.mate - ply - 1;
-		if (s < β && (β = s) <= α) return s;		
+		if (s < β && (β = s) <= α) return s;
 
 		// transposition table probe
 		if (tt.probe(board.key, h) && !isPv) {
@@ -454,7 +460,7 @@ private:
 				if (h.bound != Bound.upper && s > bs) bs = s;
 			}
 		}
-		
+
 		//max depth reached
 		if (ply == Limits.plyMax) return eval(board, α, β);
 
@@ -515,7 +521,7 @@ private:
 					if (hasThreats || isTactical || board.inCheck) r = 0;
 					else if (iQuiet++ <= 3) r = 1;
 					else r = 1 + d / 4;
-					// null window search (nws) 
+					// null window search (nws)
 					s = -αβ(-α - 1, -α, d + e - r - 1);
 					// new pv found or new bestscore (bs) at reduced depth ?
 					if ((α < s && s < β) || (s > bs && r > 0)) {
@@ -568,7 +574,7 @@ private:
 					if (hasThreats || isTactical || board.inCheck) r = 0;
 					else if (iQuiet++ <= 3) r = 1;
 					else r = 1 + d / 4;
-					// null window search (nws) 
+					// null window search (nws)
 					s = - αβ(-α - 1, -α, d + e - r - 1);
 					// new pv ?
 					if ((α < s && s < β) || (s > bs && r > 0)) {
@@ -582,7 +588,7 @@ private:
 				pv[0].set(m, pv[1]);
 				info.update(nNodes, d, time);
 				info.store(iPv, bs, pv[0]);
-				if (iPv == 0) tt.store(board.key, d, 0, tt.bound(bs, β), bs, m); 
+				if (iPv == 0) tt.store(board.key, d, 0, tt.bound(bs, β), bs, m);
 				if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
 				if ((α = bs) >= β) break;
 			} else if (i == iPv) {
@@ -634,12 +640,9 @@ private:
 		foreach (i; 0 .. n) rootMoves.setBest(info.pv[i].move[0], i);
 
 		if (option.verbose) {
-			info.writeUCI(iPv - 1);
-			if (logFile.isOpen) {
-				logFile.write("search> ");
-				info.writeUCI(iPv - 1, logFile);
-			}
-		}			
+			if (message) message.send(info.toUCI(iPv - 1));
+			else writeln(info.toUCI(iPv - 1));
+		}
 	}
 
 	/* clear search setting before searching */
@@ -657,9 +660,9 @@ private:
 
 	/* continue iterative deepening */
 	bool persist(const int d) const {
-		return checkTime(0.618034 * option.termination.time.max) 
+		return checkTime(0.618034 * option.termination.time.max)
 		    && !stop && d <= option.termination.depth.max
-		    && info.score[option.multiPv - 1] <= Score.mate - d && info.score[option.multiPv - 1] >= d - Score.mate;
+		    && (info.score[0] <= Score.mate - d && info.score[0] >= d - Score.mate);
 	}
 
 	/* search limited on some moves */
@@ -673,7 +676,7 @@ public:
 		board = null;
 		eval = new Eval;
 		tt = new TranspositionTable(size);
-		event = null;
+		message = null;
 		option.verbose = true;
 	}
 
@@ -717,17 +720,19 @@ public:
 			option.easy = easy;
 			setup();
 			if (moves.length > 0) keepMoves(moves);
-			if (tt.date == 1) log("search> date const hashtable cleared");
-			log("search> go: %s", option);
-			log("search> moves: %s", rootMoves);
+			if (message) {
+				if (tt.date == 1) message.log("search> date in hashtable cleared");
+				message.log("search> go: ", option);
+				message.log("search> moves: ", rootMoves);
+			}
 			if (rootMoves.length == 0) {
 				rootMoves.push(0);
 			} else if (option.easy && rootMoves.length == 1) {
-				multiPv(option.multiPv, option.depthInit);			
+				multiPv(option.multiPv, option.depthInit);
 			} else  {
 				for (int d = option.depthInit; persist(d); ++d) {
 					multiPv(option.multiPv, d);
-				}				
+				}
 			}
 		timer.stop();
 	}
@@ -748,14 +753,21 @@ public:
 
 	/* show settings */
 	void showSetting() {
-		option.show();
-		writefln("    TT size: %s entries %s Mb", tt.entry.length, tt.entry.length * Entry.sizeof);
-		eval.showSetting();
-	}	
+		if (message) {
+			message.send(" setting> ", option.toString());
+			message.send(" setting> TT size: ", tt.entry.length, " entries, ", tt.entry.length * Entry.sizeof, " Mb");
+			message.send(" setting> ", eval.setting());
+		}
+	}
+
+	/* show settings */
+	void showMoves() {
+		rootMoves.dump();
+	}
 
 	/* get the best move */
 	Move bestMove() @property {
-		if (rootMoves[0] != info.pv[0].move[0]) log("bug> best move mismatch: rm: %s pv[0]: %s", rootMoves[0].toPan(), info.pv[0].move[0].toPan());
+		if (rootMoves[0] != info.pv[0].move[0] && message) message.log("bug> best move mismatch: rm: ", rootMoves[0].toPan(), ", pv[0]: ", info.pv[0].move[0].toPan());
 		return rootMoves[0];
 	}
 
@@ -809,7 +821,7 @@ int epdTest(string [] args, const bool checkSolution = true) {
 	bool verbose, help;
 	Termination termination;
 	Moves moves;
-	
+
 	getopt(args, "movetime|t", &t, "depth|d", &d, "hash|H", &ttSize, "verbose|v", &verbose, "file|f", &epdFile, "help|h", &help);
 	if (help) {
 		writeln("epd [--movetime|-t <time>] [--depth|-d <depth>] [--hash|-H] [--verbose|-v <bool>] --file <epd file> [--help]");
@@ -820,7 +832,7 @@ int epdTest(string [] args, const bool checkSolution = true) {
 		writeln("\t--file|-f <epd file>  EPD file to test");
 		writeln("\t--help|-h             display this help\n");
 	}
-	
+
 	termination.time.max = termination.time.extra = t;
 	termination.depth.max = min(d, Limits.plyMax);
 	termination.nodes.max = ulong.max;
@@ -830,8 +842,7 @@ int epdTest(string [] args, const bool checkSolution = true) {
 	s.option.verbose = verbose;
 	Board b = new Board;
 	writefln("*** epdTest  depth: %d, time: %.3fs, memory: %d MB ***", d, t, ttSize);
-	if (verbose) s.showSetting();
-		
+
 	auto f = std.stdio.File(epdFile);
 
 	foreach (line; f.byLine()) {
