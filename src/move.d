@@ -53,13 +53,12 @@ Move fromPan(string s) {
 
 /* convert a string using standard algebraic notation (SAN) into a move */
 Move fromSan(string s, Board b) {
-	int r, f;
+	int i, r = -1, f = -1;
 	Square from, to;
 	Piece promotion = Piece.none;
-	Moves moves = void;
+	Move move;
 	Piece p;
-	int i;
-	f = r = Square.none;
+	bool isCapture;
 
 	bool hasString(string t) {return  s.length >= t.length && s[0 .. t.length] == t; }
 	bool hasChar(const int j, char c) { return j < s.length && s[j] == c; }
@@ -69,14 +68,15 @@ Move fromSan(string s, Board b) {
 	if (hasString("O-O-O") || hasString("0-0-0")) {
 		from = b.xKing[b.player];
 		to = cast (Square) (from - 2);
-		p = Piece.king;
+		move = toMove(from, to);
 	} else if (hasString("O-O") || hasString("0-0")) {
 		from = b.xKing[b.player];
 		to = cast (Square) (from + 2);
-		p = Piece.king;
+		move = toMove(from, to);
 	} else {
-		p = Piece.pawn;
 		if (isUpper(s[i])) p = toPiece(s[i++]);
+		else p = Piece.pawn;
+		isCapture = true;
 		if (hasChar(i, 'x')) ++i;
 		else if (hasChar(i + 1, 'x')) {
 			if (hasAlpha(i)) f = s[i] - 'a';
@@ -87,6 +87,7 @@ Move fromSan(string s, Board b) {
 			if (hasDigit(i + 1)) r = s[i + 1] - '1';
 			i += 3;
 		} else {
+			isCapture = false;
 			if (hasAlpha(i + 1)) {
 				if (hasAlpha(i)) f = s[i] - 'a';
 				else if (hasDigit(i)) r = s[i] - '1';
@@ -104,18 +105,15 @@ Move fromSan(string s, Board b) {
 		}
 	}
 
-	//TODO: find the move without generating all of them
-	moves.generate(b);
-	foreach (m; moves) {
-		if (p == toPiece(b[m.from]) && to == m.to && promotion == m.promotion
-		&& (f == Square.none || file(m.from) == f) && (r == Square.none || rank(m.from) == r)) {
-			return m;
-		}
-	}
+	if (move == 0) move = b.guess(p, to, f, r, promotion, isCapture);
 
-	debug stderr.writeln(p, ":", to, ", ", r, ", ", f, ", ", promotion);
-	debug stderr.writeln("moves: ", moves);
-	throw new Exception("Bad SAN : '" ~ s ~ "'");
+	if (b.isLegal(move)) return move;
+
+	debug {
+		stderr.writeln(b);
+		stderr.writeln("guess(", p, ", ", to, ", ", r, ", ", f, ", ", promotion, ", ", isCapture, ") = ", b.guess(p, to, f, r, promotion, isCapture).toPan());
+	}
+	throw new Exception("Bad SAN : '" ~ s ~ "' -> " ~ toPan(move));
 }
 
 /* convert a move to a string using Standard Algebraic Notation (SAN) */
@@ -206,7 +204,7 @@ struct MoveItem {
 
 struct Moves {
 public:
-	MoveItem [Limits.movesMax] item;
+	MoveItem [Limits.moves.max] item;
 	size_t index;
 private:
 	enum Stage {ttMove1, ttMove2, captureGeneration, captureSelection, killer1, killer2, refutation, quietGeneration, evasionGeneration, moveSelection };
