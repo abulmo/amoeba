@@ -10,7 +10,7 @@ import core.atomic, core.thread;
 
 
 /*
- * Vector  (as const Mathematics)
+ * Vector  (as in Mathematics)
  */
 struct Vector {
 	double [] data;
