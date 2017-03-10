@@ -10,7 +10,7 @@ import board, kpk, move, util, weight;
 import std.algorithm, std.conv, std.stdio;
 
 
-/*
+/* 
  * Value
  */
 struct Value {
@@ -86,9 +86,9 @@ private:
 	enum centipawn = 1024;
 	enum halfcentipawn = 512;
 	Weight coeff;
-	Stack [Limits.plyMax + 1] stack;
-	ulong [Square.size] coverage;
-	ulong [Color.size] attack;
+	Stack [Limits.ply.max + 1] stack;
+	ulong [Square.size] attackFromSquare;
+	ulong [Color.size] attackByPlayer;
 	PawnEntry [] pawnTable;
 	int ply;
 
@@ -168,35 +168,36 @@ private:
 
 	/* compute a bitboard of all squares attacked by a type of piece */
 	void setCoverage(Piece p)(const Board b, const Color player) {
-		static if (p == Piece.pawn) {
-			const ulong O = ~b.piece[Piece.none];
-			ulong attacker = b.piece[p] & b.color[player];
+		static assert (p == Piece.pawn);
+		const ulong O = ~b.piece[Piece.none];
+		ulong attacker = b.piece[p] & b.color[player];
 
-			while (attacker) {
-				Square x = popSquare(attacker);
-				coverage[x] = Board.coverage!p(x, O, player);
-				attack[player] |= coverage[x];
-			}
-
+		while (attacker) {
+			Square x = popSquare(attacker);
+			attackFromSquare[x] = Board.coverage!p(x, O, player);
+			attackByPlayer[player] |= attackFromSquare[x];
 		}
 	}
 
 	/* compute a bitboard of all squares attacked by a type of piece */
 	void setCoverage(Piece p)(const Board b) {
+		static assert (p != Piece.pawn);
 		const ulong O = ~b.piece[Piece.none];
 		ulong attacker = b.piece[p];
 
 		while (attacker) {
 			const Square x = popSquare(attacker);
-			coverage[x] = Board.coverage!p(x, O);
-			const Color player = toColor(b[x]);
-			attack[player] |= coverage[x];
+			const Color c = toColor(b[x]);
+
+			attackFromSquare[x] = Board.coverage!p(x, O);
+			attackByPlayer[c] |= attackFromSquare[x];
 		}
 	}
 
-	/* init the coverage[] & attack[] arrays */
+	/* init the attackFromSquare[], attackByPlayer[] arrays */
 	void initAttack(const Board b) {
-		attack[] = 0;
+		attackByPlayer[] = 0;
+
 		setCoverage!(Piece.pawn)(b, Color.white);
 		setCoverage!(Piece.pawn)(b, Color.black);
 		setCoverage!(Piece.knight)(b);
@@ -204,6 +205,7 @@ private:
 		setCoverage!(Piece.rook)(b);
 		setCoverage!(Piece.queen)(b);
 		setCoverage!(Piece.king)(b);
+
 	}
 
 	/* mobility / attack / defense evaluation components */
@@ -212,38 +214,42 @@ private:
 		const ulong P = b.color[player];
 		const ulong E = b.color[enemy];
 		const ulong V = b.piece[Piece.none];
-		const ulong A = attack[enemy];
+		const ulong A = attackByPlayer[enemy];
 		ulong attacker = b.piece[p] & P, a;
 		const Stack *s = &stack[ply];
 		Value v;
 		Square x;
 
-		static if (p != Piece.king) {
-			v = coeff.kingDefense[p] * countBits(attacker & s.kingZone[player]);
-		}
-
-		static if (p == Piece.pawn) {
-			a = player == Color.white ? attacker << 8 : attacker >> 8;
-			v += coeff.safePawnAdvance * countBits(a & V & ~A);
-			v += coeff.unsafePawnAdvance * countBits(a & V & A);
-			v += coeff.safePawnBlock * countBits(a & E & ~A);
-			v += coeff.unsafePawnBlock * countBits(a & E & A);
-			v += coeff.safePawnDouble * countBits(a & P & ~A);
-			v += coeff.unsafePawnDouble * countBits(a & P & A);
-		}
-
-		while (attacker) {
-			x = popSquare(attacker);
-			a = coverage[x];
-			v += coeff.safeMobility[p] * countBits(a & V & ~A);
-			v += coeff.unsafeMobility[p] * countBits(a & V & A);
-			v += coeff.safeAttack[p] * countBits(a & E & ~A);
-			v += coeff.unsafeAttack[p] * countBits(a & E & A);
-			v += coeff.safeDefense[p] * countBits(a & P & ~A);
-			v += coeff.unsafeDefense[p] * countBits(a & P & A);
+		if (attacker) {
 			static if (p != Piece.king) {
-				v += coeff.kingAttack[p] * countBits(a & s.kingZone[enemy]);
+				v = coeff.kingDefense[p] * countBits(attacker & s.kingZone[player]); // pieces near own king
 			}
+
+			static if (p == Piece.pawn) { //  pawns' pushes
+				a = player == Color.white ? attacker << 8 : attacker >> 8;
+				if (a) {
+					v += coeff.safePawnAdvance * countBits(a & V & ~A); //  on empty squares
+					v += coeff.unsafePawnAdvance * countBits(a & V & A);
+					v += coeff.safePawnBlock * countBits(a & E & ~A);   // blocked by enemy
+					v += coeff.unsafePawnBlock * countBits(a & E & A);
+					v += coeff.safePawnDouble * countBits(a & P & ~A);  // blocked by own piece
+					v += coeff.unsafePawnDouble * countBits(a & P & A);
+				}
+			}
+
+			do {
+				x = popSquare(attacker);
+				a = attackFromSquare[x];
+				v += coeff.safeMobility[p] * countBits(a & V & ~A);  // moves on empty squares
+				v += coeff.unsafeMobility[p] * countBits(a & V & A);
+				v += coeff.safeAttack[p] * countBits(a & E & ~A);    // attacks opponent pieces
+				v += coeff.unsafeAttack[p] * countBits(a & E & A);
+				v += coeff.safeDefense[p] * countBits(a & P & ~A);   // defends own pieces.
+				v += coeff.unsafeDefense[p] * countBits(a & P & A);
+				static if (p != Piece.king) {
+					v += coeff.kingAttack[p] * countBits(a & s.kingZone[enemy]); // pieces attacking opponent king neighbourhood
+				}
+			} while (attacker);
 		}
 
 		return v;
@@ -255,7 +261,7 @@ private:
 		const ulong P = b.color[player];
 		const ulong E = b.color[enemy];
 		const ulong V = b.piece[Piece.none];
-		const ulong A = attack[enemy];
+		const ulong A = attackByPlayer[enemy];
 		ulong attacker = b.mask[x].bit, a;
 		const Stack *s = &stack[ply];
 		Value v;
@@ -274,7 +280,7 @@ private:
 			v += coeff.unsafePawnDouble * countBits(a & P & A);
 		}
 
-		a = coverage[x];
+		a = attackFromSquare[x];
 		v += coeff.safeMobility[p] * countBits(a & V & ~A);
 		v += coeff.unsafeMobility[p] * countBits(a & V & A);
 		v += coeff.safeAttack[p] * countBits(a & E & ~A);
@@ -505,10 +511,10 @@ private:
 		write("unsafe mobility: ");
 		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeMobility[p]." ~ phase) / 16);
 		writeln("");
-		write("safe attack: ");
+		write("safe attackByPlayer: ");
 		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.safeAttack[p]." ~ phase) / 16);
 		writeln("");
-		write("unsafe attack: ");
+		write("unsafe attackByPlayer: ");
 		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeAttack[p]." ~ phase) / 16);
 		writeln("");
 		write("safe defense: ");
@@ -517,7 +523,7 @@ private:
 		write("unsafe defense: ");
 		foreach(p; Piece.pawn .. Piece.size) writef("%+4d, ", mixin("coeff.unsafeDefense[p]." ~ phase) / 16);
 		writeln("");
-		write("King attack: ");
+		write("King attackByPlayer: ");
 		foreach(p; Piece.pawn .. Piece.king) writef("%+4d, ", mixin("coeff.kingAttack[p]." ~ phase) / 16);
 		writeln("");
 		write("King defense: ");
@@ -704,8 +710,8 @@ public:
 		int [Color.size] m;
 
 		initAttack(board);
-		foreach(Color c; Color.white .. Color.size) {
-			foreach(Piece p; Piece.pawn .. Piece.size) {
+		foreach (c; Color.white .. Color.size) {
+			foreach (p; Piece.pawn .. Piece.size) {
 				ulong b = board.color[c] & board.piece[p];
 				immutable n = countBits(b);
 				material[c][p] = coeff.material[p] * n / 16;
@@ -727,7 +733,7 @@ public:
 		writeln("               Material                Positional                Mobility");
 		writeln("          Opening     Endgame      Opening     Endgame      Opening     Endgame");
 		writeln("Piece   White Black White Black  White Black White Black  White Black White Black");
-		foreach(Piece p; Piece.pawn .. Piece.size) {
+		foreach (p; Piece.pawn .. Piece.size) {
 			writefln("%6s  %+5d %+5d %+5d %+5d  %+5d %+5d %+5d %+5d  %+5d %+5d %+5d %+5d", p,
 				material[0][p].opening, material[1][p].opening, material[0][p].endgame, material[1][p].endgame,
 				positional[0][p].opening, positional[1][p].opening, positional[0][p].endgame, positional[1][p].endgame,
@@ -736,13 +742,13 @@ public:
 		}
 
 
-		foreach(Color c; Color.white .. Color.size) m[c] = countBits(board.color[c] & ~board.piece[Piece.pawn]);
+		foreach (c; Color.white .. Color.size) m[c] = countBits(board.color[c] & ~board.piece[Piece.pawn]);
 		if (m[0] > m[1]) {
 			writefln("imbal. %+5d        %+5d", coeff.materialImbalance.opening/16, coeff.materialImbalance.endgame / 16);
 		} else if (m[1] > m[0]) {
 			writefln("imbal.       %+5d        %+5d", coeff.materialImbalance.opening/16, coeff.materialImbalance.endgame / 16);
 		}
-		foreach(Color c; Color.white .. Color.size) value[c] = pawnStructure(board, c);
+		foreach (c; Color.white .. Color.size) value[c] = pawnStructure(board, c);
 		writefln("pawn s. %+5d %+5d %+5d %+5d", value[0].opening/16, value[1].opening/16, value[0].endgame/16, value[1].endgame/16);
 		if (board.player == Color.white) writefln(" tempo  %+5d      %+5d", coeff.tempo.opening/16, coeff.tempo.endgame/16);
 		else writefln(" tempo        %+5d      %+5d", coeff.tempo.opening/16, coeff.tempo.endgame/16);
@@ -750,14 +756,14 @@ public:
 		writefln(" stage  %+5d", stack[ply].stage);
 		writefln("  lazy  %+5d", opCall(board));
 		writefln("  full  %+5d", opCall(board, Score.low, Score.high));
-		writeln("Pawn structure:"); foreach(Color c; Color.white .. Color.size)  showPawnStructure(board, c);
 
+		writeln("Pawn structure:"); foreach (c; Color.white .. Color.size)  showPawnStructure(board, c);
 		showBoard("Eval per square", board);
 	}
 
 	/* display setting */
 	string setting() {
-		return "PawnTT size: " ~ to!string(pawnTable.length) ~ " entries " ~ to!string(pawnTable.length * PawnEntry.sizeof) ~ " Mb";
+		return "PawnTT size: " ~ to!string(pawnTable.length) ~ " entries " ~ to!string(pawnTable.length * PawnEntry.sizeof) ~ " B";
 	}
 
 
