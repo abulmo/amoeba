@@ -13,7 +13,12 @@ version (LDC) import ldc.intrinsics;
 else version (GNU) import gcc.builtins;
 
 /* limits */
-enum Limits {plyMax = 100, gameSize = 4096, moveSize = 4096, moveMask = 4095, movesMax = 256}
+struct Limits {
+	enum ply {max = 100};
+	enum game {size = 4096};
+	enum move {size = 4096, mask = 4095};
+	enum moves {size = 256};
+}
 
 enum Score {mate = 30000, low = -29000, high = 29000, big = 3000}
 
@@ -122,6 +127,7 @@ struct Chrono {
 	}
 }
 
+/* return milliseconds part from a (sys)time */
 int millisecond(const ref SysTime t) {
 	int msecs;
 	t.fracSecs.split!("msecs")(msecs);
@@ -143,6 +149,9 @@ string hour() {
 
 /*
  * class Message
+ * manage all io:
+ *  - communication with the GUI
+ *  - logging for debugging
  */
 shared class Message {
 private:
@@ -186,19 +195,16 @@ public:
 
 	/* peek an event */
 	string peek() {
+		string s;
 		synchronized (lock) {
-			string s;
 			if (!empty) {
 				s = ring[first];
 				ring[first] = null;
 				first = (first  + 1) % ring.length;
-				if (logFile.isOpen) {
-					logFile.writefln("[%s %s] %s< %s", date(), hour(), header, s);
-					logFile.flush();
-				}
 			}
-			return s;
 		}
+		if (s !is null) log!'<'(s);
+		return s;
 	}
 
 	/* wait for an event */
@@ -219,23 +225,20 @@ public:
 			line = readln().chomp();
 			push(line);
 		} while (line != "quit" && stdin.isOpen);
+		log("Bye!");
 	}
 
 	/* send */
 	void send(T...) (T args) {
 		stdout.writeln(args);
 		stdout.flush();
-		if (logFile.isOpen) {
-			logFile.writef("[%s %s] %s> ", date(), hour(), header);
-			logFile.writeln(args);
-			logFile.flush();
-		}
+		log!'>'(args);
 	}
 
 	/* log */
-	void log(T...) (T args) {
+	void log(const char tag = '#', T...) (T args) {
 		if (logFile.isOpen) {
-			logFile.writef("[%s %s] %s# ", date(), hour(), header);
+			logFile.writef("[%s %s] %s%c ", date(), hour(), header, tag);
 			logFile.writeln(args);
 			logFile.flush();
 		}
@@ -243,12 +246,17 @@ public:
 
 	/* turn on logging for debugging purpose */
 	void logOn() {
-		logFile.open(header ~ "-" ~ to!string(thisProcessID) ~ ".log", "w");		
+		if (!logFile.isOpen) logFile.open(header ~ "-" ~ to!string(thisProcessID) ~ ".log", "w");
 	}
 
 	/* turn off logging for debugging purpose */
 	void logOff() {
 		if (logFile.isOpen) logFile.close();
+	}
+
+	/* tell if logging is on */
+	bool isLogging() {
+		return logFile.isOpen;
 	}
 }
 
