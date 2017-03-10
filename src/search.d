@@ -186,13 +186,14 @@ private:
 			string s;
 
 			s = "Search setting:";
-			s ~= "\n\t Time: max: " ~ to!string(termination.time.max) ~ " s, extra:" ~ to!string(termination.time.extra);
-			s ~= " s\n\tNodes: max: " ~ to!string(termination.nodes.max);
-			s ~= "\n\tDepth: max: " ~ to!string(termination.depth.max);
-			s ~= "\n\tMultiPv: " ~ to!string(multiPv);
-			s ~= "\n\teasy: " ~ to!string(easy);
-			s ~= "\n\tisPondering: " ~ to!string(isPondering);
-			s ~= "\n\tverbose: " ~ to!string(verbose);
+			s ~= "\n - Time:  max: " ~ to!string(termination.time.max) ~ " s, extra:" ~ to!string(termination.time.extra);
+			s ~= " s\n - Nodes: max: " ~ to!string(termination.nodes.max);
+			s ~= "\n - Depth: max: " ~ to!string(termination.depth.max) ~ " init: " ~ to!string(depthInit);
+			s ~= "\n - Score: init: " ~ to!string(scoreInit);
+			s ~= "\n - MultiPv: " ~ to!string(multiPv);
+			s ~= "\n - easy: " ~ to!string(easy);
+			s ~= "\n - isPondering: " ~ to!string(isPondering);
+			s ~= "\n - verbose: " ~ to!string(verbose);
 
 			return s;
 		}
@@ -201,10 +202,10 @@ private:
 	/* search Info */
 	struct Info {
 		ulong nNodes;
-		int [Limits.movesMax] score;
+		int [Limits.moves.max] score;
 		int depth;
 		double time;
-		Line [Limits.movesMax] pv;
+		Line [Limits.moves.max] pv;
 		size_t multiPv;
 
 		/* save current search infos (except pv / score) */
@@ -276,9 +277,9 @@ private:
 	Info info;
 	Moves rootMoves;
 	Line line;
-	Line [Limits.plyMax + 1] pv;
-	Move [2][Limits.plyMax + 1] killer;
-	Move [Limits.moveSize] refutation;
+	Line [Limits.ply.max + 1] pv;
+	Move [2][Limits.ply.max + 1] killer;
+	Move [Limits.move.size] refutation;
 	ulong nNodes;
 	int ply, iPv;
 	Chrono timer;
@@ -337,7 +338,7 @@ private:
 			killer[ply][0] = m;
 		}
 
-		if (ply > 0) refutation[line.top & Limits.moveMask] = m;
+		if (ply > 0) refutation[line.top & Limits.move.mask] = m;
 
 		history.update(board, m, d * d);
 	}
@@ -402,7 +403,7 @@ private:
 		}
 
 		//max depth reached
-		if (ply == Limits.plyMax) return eval(board, α, β);
+		if (ply == Limits.ply.max) return eval(board, α, β);
 
 		// move generation: good captures & promotions if not in check
 		moves.setup(board.inCheck, h.move);
@@ -462,7 +463,7 @@ private:
 		}
 
 		//max depth reached
-		if (ply == Limits.plyMax) return eval(board, α, β);
+		if (ply == Limits.ply.max) return eval(board, α, β);
 
 		// selective search: "frontier" node pruning & null move
 		bool hasThreats = (board.inCheck || α >= Score.big || β <= -Score.big);
@@ -502,7 +503,7 @@ private:
 		}
 
 		// prepare move generation
-		moves.setup(board.inCheck, h.move, killer[ply], refutation[line.top & Limits.moveMask], history);
+		moves.setup(board.inCheck, h.move, killer[ply], refutation[line.top & Limits.move.mask], history);
 
 		const αOld = α;
 
@@ -642,7 +643,7 @@ private:
 		if (option.verbose) {
 			if (message) message.send(info.toUCI(iPv - 1));
 			else writeln(info.toUCI(iPv - 1));
-		}
+		} else if (message) message.log!'>'(info.toUCI(iPv - 1));
 	}
 
 	/* clear search setting before searching */
@@ -662,7 +663,7 @@ private:
 	bool persist(const int d) const {
 		return checkTime(0.618034 * option.termination.time.max)
 		    && !stop && d <= option.termination.depth.max
-		    && (info.score[0] <= Score.mate - d && info.score[0] >= d - Score.mate);
+		    && (option.multiPv > 1 || (info.score[0] <= Score.mate - d && info.score[0] >= d - Score.mate));
 	}
 
 	/* search limited on some moves */
@@ -699,7 +700,7 @@ public:
 		Move m;
 		static if (copy) board = b.dup; else board = b;
 		tt.probe(board.key, h);
-		rootMoves.setup(board.inCheck, h.move, killer[0], refutation[0], history);
+		rootMoves.setup(board.inCheck, h.move, killer[2], refutation[2], history);
 		while ((m = rootMoves.selectMove(board).move) != 0) {}
 		if (h.bound == Bound.exact && h.move[0] == rootMoves[0]) {
 			option.depthInit = max(1, h.depth);
@@ -743,7 +744,7 @@ public:
 			setup();
 			option.termination.time.max = option.termination.time.extra = double.infinity;
 			option.termination.nodes.max = ulong.max;
-			option.termination.depth.max = min(d, Limits.plyMax - 1);
+			option.termination.depth.max = min(d, Limits.ply.max - 1);
 			option.isPondering = false;
 			option.multiPv = 1;
 			option.easy = false;
@@ -755,7 +756,7 @@ public:
 	void showSetting() {
 		if (message) {
 			message.send(" setting> ", option.toString());
-			message.send(" setting> TT size: ", tt.entry.length, " entries, ", tt.entry.length * Entry.sizeof, " Mb");
+			message.send(" setting> TT size: ", tt.entry.length, " entries, ", tt.entry.length * Entry.sizeof, " B");
 			message.send(" setting> ", eval.setting());
 		}
 	}
@@ -812,42 +813,47 @@ bool epdMatch(string epd, Board b, const Move found) {
 }
 
 /* Test the search using an epd file */
-int epdTest(string [] args, const bool checkSolution = true) {
+int epdTest(string [] arg, const bool checkSolution = true) {
 	double t = double.infinity, T = 0, D = 0;
-	int d = Limits.plyMax, n, nGoods;
+	int d = Limits.ply.max, n, nGoods;
 	size_t ttSize = 256;
 	ulong N;
 	string epdFile;
-	bool verbose, help;
+	bool verbose, help, dbg;
 	Termination termination;
 	Moves moves;
 
-	getopt(args, "movetime|t", &t, "depth|d", &d, "hash|H", &ttSize, "verbose|v", &verbose, "file|f", &epdFile, "help|h", &help);
+	getopt(arg, std.getopt.config.caseSensitive, "movetime|t", &t, "depth|d", &d, "hash|H", &ttSize,
+		"verbose|v", &verbose, "file|f", &epdFile, "debug|g", &dbg, "help|h", &help);
 	if (help) {
-		writeln("epd [--movetime|-t <time>] [--depth|-d <depth>] [--hash|-H] [--verbose|-v <bool>] --file <epd file> [--help]");
-		writefln("\t--movetime|-t <time>  maximum time per move in seconds (default: %s)", t);
-		writefln("\t--depth|-d <depth>    maximum depth time per move in seconds (default: %s)", d);
-		writefln("\t--hash|-H <size>      hash size in Mb (default %s MB)", ttSize);
-		writefln("\t--verbose|-v <bool>   more verbose output (default: %s)", verbose);
-		writeln("\t--file|-f <epd file>  EPD file to test");
-		writeln("\t--help|-h             display this help\n");
+		stderr.writeln(arg[0] ~ " [--movetime|-t <time>] [--depth|-d <depth>] [--hash|-H] [--verbose|-v <bool>] --file|-f <epd file> [--help|-h]");
+		if (arg[0] == "bench") stderr.writefln("Test search speed on a set of positions.");
+		else if (arg[0] == "epd") stderr.writefln("Test search performance on a set of positions.");
+		stderr.writefln("\t--movetime|-t <time>  Maximum time per move in seconds (default: %s)", t);
+		stderr.writefln("\t--depth|-d <depth>    Maximum depth time per move in seconds (default: %s)", d);
+		stderr.writefln("\t--hash|-H <size>      Hash size in Mb (default %s MB)", ttSize);
+		stderr.writefln("\t--verbose|-v          More verbose output (default: %s)", verbose);
+		stderr.writefln("\t--debug|-g            Log on to a debug file (default: %s)", dbg);
+		stderr.writeln("\t--file|-f <epd file>   EPD file to test");
+		stderr.writeln("\t--help|-h              Display this help\n");
 	}
 
 	termination.time.max = termination.time.extra = t;
-	termination.depth.max = min(d, Limits.plyMax);
+	termination.depth.max = min(d, Limits.ply.max);
 	termination.nodes.max = ulong.max;
 	moves.clear();
 	ttSize = min(4096, max(1, ttSize));
 	Search s = new Search(ttSize * 1024 * 1024);
+	s.message = new shared Message("Amoeba-epdtest");
+	if (dbg) s.message.logOn();
 	s.option.verbose = verbose;
 	Board b = new Board;
 	writefln("*** epdTest  depth: %d, time: %.3fs, memory: %d MB ***", d, t, ttSize);
-
 	auto f = std.stdio.File(epdFile);
 
 	foreach (line; f.byLine()) {
 		string epd = to!string(line).chomp();
-		if (epd == "") continue;
+		if (epd == "" || epd[0] == '#') continue;
 		b.set(epd);
 		if (verbose) {
 			writeln();
