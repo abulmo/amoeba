@@ -10,7 +10,7 @@ import board, eval, move, search, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
 
 /* version */
-enum string versionNumber="2.2";
+enum string versionNumber="2.3";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -45,18 +45,17 @@ class Uci {
 	Board board;
 	Moves moves;
 	shared util.Message message;	
-	Chrono chrono;
 	Time [Color.size] time;
 	int depthMax, movesToGo, multipv;
 	ulong nodesMax;
 	bool canPonder, isPondering, easy;
 
 	/* constructor */
-	this() {
-		chrono.start();
+	this(const bool dbg = false) {
 		name = "Amoeba " ~ versionNumber ~ '.' ~ arch;
 		search = new Search;
 		search.message = message = new shared util.Message(name);
+		if (dbg) message.logOn();
 		board = new Board;
 		ucinewgame();
 		canPonder = false;
@@ -103,7 +102,7 @@ class Uci {
 		message.send("id author Richard Delorme");
 		message.send("option name Ponder type check default false");
 		message.send("option name Hash type spin default 64 min 1 max 4096");
-		message.send("option name Log type check default true");
+		message.send("option name Log type check default ", message.isLogging());
 		message.send("option name MultiPV type spin default 1 min 1 max 256");
 		message.send("option name UCI_AnalyseMode type check default false");
 		// add more options here...
@@ -164,7 +163,7 @@ class Uci {
 		string [] words = line.split();
 
 		moves.clear();
-		termination.depth.max = Limits.plyMax;
+		termination.depth.max = Limits.ply.max;
 		termination.nodes.max = ulong.max;
 		foreach(c ; Color.white .. Color.size) time[c].clear();
 		isPondering = false;
@@ -180,7 +179,7 @@ class Uci {
 			else if (w == "nodes" && i + 1 < words.length) termination.nodes.max = to!ulong(words[i + 1]);
 			else if (w == "mate" && i + 1 < words.length) termination.depth.max = to!int(words[i + 1]); /* TODO: turnoff selective search? */
 			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
-			else if (w == "infinite") termination.depth.max =  Limits.plyMax;
+			else if (w == "infinite") termination.depth.max =  Limits.ply.max;
 		}
 		termination.time.max = setTime();
 		termination.time.extra = setExtraTime(termination.time.max);
@@ -207,13 +206,24 @@ class Uci {
 		stdout.flush();
 	}	
 
+	/* research */
+	void searchValue(string line) {
+		int depth = to!int(line.strip());
+		search.go(depth);
+		writeln("search ", depth, ": ", search.score);
+	}
+
+	/* research */
+	void eval() {
+		writeln("eval: ", search.eval(board, -Score.mate, Score.mate));
+	}
+
 	/* main loop */
 	void loop(const bool readStdin = true) {
 		if (readStdin) spawn(&messageLoop, message);
-		while (true) {
+		while (stdin.isOpen) {
 			auto line = message.retrieve();
-			if (line == null) break;
-			else if (line == "" || line[0] == '#') continue;
+			if (line is null || line == "" || line[0] == '#') continue;
 			else if (findSkip(line, "ucinewgame")) ucinewgame();
 			else if (findSkip(line, "uci")) uci();
 			else if (findSkip(line, "isready")) message.send("readyok");
@@ -228,6 +238,8 @@ class Uci {
 			else if (findSkip(line, "register")) {}
 			// extension
 			else if (findSkip(line, "show")) show(line);
+			else if (findSkip(line, "search")) searchValue(line);
+			else if (findSkip(line, "eval")) eval();
 			else if (findSkip(line, "perft")) perft(("perft " ~ line).split, board);
 			else message.log("error unknown command: '%s'", line);
 		}
@@ -262,5 +274,4 @@ unittest {
 	uci.message.push("quit");
 	uci.loop(false);
 }
-
 
