@@ -6,7 +6,8 @@
  */
 
 import util, board, move, game;
-import std.conv, std.getopt, std.math, std.mathspecial, std.parallelism, std.process, std.stdio, std.range, std.string, std.format, std.algorithm;
+import std.algorithm, std.conv, std.format, std.getopt, std.parallelism, std.process, std.range, std.stdio, std.string;
+import std.math, std.mathspecial, std.random;
 
 /*
  * Engine
@@ -135,7 +136,7 @@ class Match {
 	/* create a new match setting */
 	this (Engine [Color.size] e, const shared Game opening, const double t) {
 		engine = e;
-		game = new shared Game(opening);
+		game = new shared Game(opening, true);
 		ms = cast (int) (1000 * t + 0.5);
 	}
 
@@ -313,7 +314,7 @@ public:
 
 		if (v & Var.trinomial) {
 			writeln("Using variance of the trinomial distribution of single games:");
-			end = LLR(var3());
+			if (v & Var.pentanomial) end &= LLR(var3()); else end = LLR(var3());
 		}
 
 		return end;
@@ -368,6 +369,29 @@ public:
 		}
 	}
 
+	/* constructor */
+	this(const string [] engineName, const int depth, const int nOpenings, string outputFile, const double elo0, const double elo1, const double α, const double β) {
+		Board b = new Board;
+		Random r;
+
+		openings = new shared GameBase;	
+		r.seed(unpredictableSeed);
+		foreach (o; 0 .. nOpenings) {
+			shared Game game = new shared Game;
+			game.random(b, r, depth);
+			openings ~= game;
+		}
+		if (openings.length == 0) openings ~= new shared Game;
+		if (outputFile) output.open(outputFile, "w");
+
+		sprt = SPRT(elo0, elo1, α, β);
+
+		foreach(i; 0 .. taskPool.size + 1) {
+			player ~= new Engine(engineName[0]);
+			opponent ~= new Engine(engineName[1]);
+		}
+	}
+
 	/* start a pool of UCI engines */
 	void start(const bool showDebug) {
 		foreach (ref e; player) e.start(showDebug);
@@ -399,27 +423,28 @@ public:
 void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
-	int nGames = 30000, nCpu = 1;
+	int nGames = 30000, nCpu = 1, nRandom;
 	bool showVersion, showHelp, showDebug;
 	string [] engineName, openingFile;
 	string outputFile, var;
 	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05;
-	Var v = Var.all;
+	Var v;
 
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time,
-		"book|b", &openingFile, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
+		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
 		"debug|d", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.2\n© 2017 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.3\n© 2017 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
 		writeln("\ntourney --engine|-e <cmd> --engine|-e <cmd>  [optional settings]") ;
 		writeln("    --engine|-e <cmd>        launch an engine with <cmd>. 2 engines should be loaded");
-		writeln("    --time|-t <movetime>     time (const seconds) to play a move (default 0.1s)");
+		writeln("    --time|-t <movetime>     time (in seconds) to play a move (default 0.1s)");
 		writeln("    --book|-b <pgn|epd file> opening book");
+		writeln("    --random|-r depth>       random opening moves up to <depth>");
 		writeln("    --output|-o <pgn file>   save the played games");
 		writeln("    --games|-g <games>       max number of game pairs to play (default 30000)");
 		writeln("    --cpu|-n <cpu>           number of games to play in parallel (default 1)");
@@ -428,7 +453,7 @@ void main(string [] args) {
 		writeln("    --alpha <alpha>          type I error (default = 0.05)");
 		writeln("    --beta  <beta>           type II error (default = 0.05)");
 		writeln("    --variance|-v <type>     none|3nomial|5nomial|all (default=all) ");
-		writeln("    --debug|-d               allow debugging by the engine to a log file");
+		writeln("    --debug                  allow debugging by the engine to a log file");
 		writeln("    --help|-h                display this help");
 		writeln("    --version                show version number");
 		writeln("\nFor example:\n$ tourney -e amoeba-2.1 -e amoeba-2.0 -g 30000 -b opening.pgn -t 0.1 -n 3 -o game.pgn -v 5nomial");
@@ -451,12 +476,14 @@ void main(string [] args) {
 	var = var.toLower;
 	if (var == "pentanomial" || var == "5-nomial" || var == "5nomial") v = Var.pentanomial;
 	else if (var == "trinomial" || var == "3-nomial" || var == "3nomial") v = Var.trinomial;
-	else if (var == "all") v = Var.all;
+	else if (var == "none") v = Var.none;
+	else v = Var.all;
 
 	// init
 	nCpu = max(0, min(nCpu - 1, totalCPUs - 1));
 	defaultPoolThreads(nCpu);
-	engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
+	if (nRandom > 0) engines = new EnginePool(engineName, nRandom, nGames, outputFile, H0, H1, α, β);
+	else engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
 
 	// run the tournament
 	engines.start(showDebug);
