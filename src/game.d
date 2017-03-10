@@ -5,7 +5,7 @@
  */
 
 import board, move, util;
-import std.algorithm, std.format, std.math, std.stdio, std.string, std.uni;
+import std.algorithm, std.format, std.math, std.random, std.stdio, std.string, std.uni;
 import core.atomic;
 
 /*
@@ -245,11 +245,12 @@ public:
 	}
 
 	/* copy constructor */
-	this(const shared Game g) {
+	this(const shared Game g, bool isOpening = false) {
 		clear();
 		tags = g.tags.dup;
 		moves = g.moves.dup;
 		infos = g.infos.dup;
+		if (isOpening) foreach(i; infos) i.book = true;
 	}
 
 	/* copy constructor */
@@ -276,6 +277,21 @@ public:
 		Tag t;
 		t.name = name; t.value = value;
 		tags ~= t;
+	}
+
+	void random(Board b, ref Random r, const int depth) {
+		Moves moves;
+		Move m;
+		Info i = {book: true};
+
+		b.set();
+		foreach (d; 0 .. depth) {
+			moves.generate(b);
+			if (moves.length == 0) break;
+			m = moves[uniform(0, moves.length, r)];
+			push(m, i);
+			b.update(m);
+		}
 	}
 
 	/* read a game from a simple PGN (no #annotation field) */
@@ -408,7 +424,9 @@ shared class GameBase {
 			string fen;
 			Board b = new Board;
 		}
+		Chrono t;
 
+		t.start();
 		r.open(fileName);
 		while (r.isOK) {
 			if ((line = r.read()) == "") continue;
@@ -435,7 +453,7 @@ shared class GameBase {
 			}
 			if (g.moves.length >= minimalLength) games ~= g;
 		}
-		writeln("read ", games.length, " games & ", n, " moves"); stdout.flush();
+		writeln("read ", games.length, " games & ", n, " moves in ", t.time(), " s."); stdout.flush();
 	}
 
 
