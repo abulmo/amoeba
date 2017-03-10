@@ -4,8 +4,6 @@
  * © 2016-2017 Richard Delorme
  */
 
-/* TODO: pack it onto a bitbase ? */
-
 module kpk;
 
 import board, eval, util;
