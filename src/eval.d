@@ -7,7 +7,7 @@
 module eval;
 
 import board, kpk, move, util, weight;
-import std.algorithm, std.conv, std.stdio;
+import std.algorithm, std.conv, std.math, std.stdio;
 
 
 /* 
@@ -26,6 +26,12 @@ struct Value {
 	/* operator overloading: a + v, b * v; apply the operator to each member data */
 	Value opBinary(string op)(const int v) const {
 		Value r = {mixin("opening " ~ op ~ " v"), mixin("endgame " ~ op ~ " v")};
+		return r;
+	}
+
+	/* operator overloading: a + v, b * v; apply the operator to each member data */
+	Value opBinary(string op)(const double v) const {
+		Value r = {cast (int) mixin("(opening " ~ op ~ " v)"), cast (int) mixin("(endgame " ~ op ~ " v)")};
 		return r;
 	}
 
@@ -61,6 +67,7 @@ private:
 		Value [Piece.size] safeMobility, unsafeMobility;
 		Value [Piece.size] safeAttack, unsafeAttack;
 		Value [Piece.size] safeDefense, unsafeDefense;
+		Value [Piece.size] centerControl;
 		Value [Piece.size] kingAttack;
 		Value [Piece.size] kingDefense;
 		Value kingShield, kingStorm;
@@ -72,7 +79,8 @@ private:
 	struct Stack {
 		ulong [Color.size] kingZone;
 		Value [Color.size] value;
-		int [Color.size] nPiece;
+		uint [Color.size] nPiece;
+		uint [Color.size] materialIndex;
 		int stage;
 	}
 	struct PawnEntry {
@@ -81,14 +89,41 @@ private:
 	}
 
 	static immutable int [Piece.size] stageValue = [0, 0, 3, 3, 5, 10, 0];
+	static immutable uint [Color.size][15] drawishTable = [
+		// QRBNP-    qrbnp-
+		[0x000200, 0x000000], // 2 knights
+		[0x001100, 0x000100], // bishop + knight vs knight
+		[0x002000, 0x000100], // 2 bishops vs knight
+		[0x002000, 0x000100], // 2 knights vs knight
+		[0x002000, 0x001000], // 2 knights vs bishop
+		[0x010000, 0x010000], // rook vs rook
+		[0x010000, 0x001000], // rook vs bishop
+		[0x010000, 0x001000], // rook vs knight
+		[0x011000, 0x010000], // rook + bishop vs rook
+		[0x010100, 0x010000], // rook + knight vs rook
+		[0x100000, 0x100000], // queen vs queen
+		[0x100000, 0x002000], // queen vs 2 bishops
+		[0x100000, 0x000200], // queen vs 2 knights
+		[0x100100, 0x100000], // queen + knight vs queen
+		[0x101000, 0x100000], // queen + bishop vs queen
+	];
+
+	static immutable uint [3] boundTable = [
+		//QRBNP-
+		0x000100, // 1 knight
+		0x001000, // 1 bishop
+		0x000200  // 2 knights
+	];
 
 	enum ε = 170;
 	enum centipawn = 1024;
 	enum halfcentipawn = 512;
+	enum ulong center = 0x0000001818000000;
 	Weight coeff;
 	Stack [Limits.ply.max + 1] stack;
 	ulong [Square.size] attackFromSquare;
 	ulong [Color.size] attackByPlayer;
+	ulong pins;
 	PawnEntry [] pawnTable;
 	int ply;
 
@@ -97,6 +132,14 @@ private:
 		const int r = rank(x) - rank(y);
 		const int f = file(x) - file(y);
 		const int d = (r * r + f * f);
+		return 1.0 / (d + 1.0);
+	}
+
+	/* compute the inclination of a target square x to a distant square y */
+	static double inclination(const Square x, const Square y) {
+		const int r = rank(x) - rank(y);
+		const int f = file(x) - file(y);
+		const int d = abs(r) + abs(f);
 		return d == 0 ? 2.0 : 1.0 / d;
 	}
 
@@ -115,18 +158,18 @@ private:
 	}
 
 	/* Build positional array coeffs from an array of attractive squares */
-	static void buildPositional(string phase)(ref Value [Square.size] positional, const Square [] y, const double a, const bool isPawn) {
-		double w;
+	static void buildPositional(string phase)(ref Value [Square.size] positional, const Square [] y, const double w, const bool isPawn) {
+		double a, m;
 		double [Square.size] p;
 
 		foreach (Square x; Square.a1 .. Square.size) {
-			w = attraction(x, y[0]);
-			foreach (i; 1 .. y.length) w = max(attraction(x, y[i]), w);
+			a = attraction(x, y[0]);
+			foreach (i; 1 .. y.length) a = max(attraction(x, y[i]), a);
 			p[x] = a * w;
 		}
 
 		if (!isPawn) {
-			double m = 0.0; foreach (x; Square.a1 .. Square.size) m += p[x]; m /= Square.size;
+			m = 0.0; foreach (x; Square.a1 .. Square.size) m += p[x]; m /= Square.size;
 			foreach (x; Square.a1 .. Square.size) p[x] -= m;
 		}
 
@@ -139,6 +182,7 @@ private:
 		s.value[c] -= coeff.positional[p][forward(x, c)] + coeff.material[p];
 		if (p > Piece.pawn) --s.nPiece[c];
 		s.stage -= stageValue[p];
+		s.materialIndex[c] -= 1 << (4 * p);
 	}
 
 	/* set a piece */
@@ -147,6 +191,7 @@ private:
 		s.value[c] += coeff.positional[p][forward(x, c)] + coeff.material[p];
 		if (p > Piece.pawn) ++s.nPiece[c];
 		s.stage += stageValue[p];
+		s.materialIndex[c] += 1 << (4 * p);
 	}
 
 	/* move a piece */
@@ -167,23 +212,35 @@ private:
 	}
 
 	/* compute a bitboard of all squares attacked by a type of piece */
-	void setCoverage(Piece p)(const Board b, const Color player) {
+	void setCoverage(Piece p)(const Board b, const Color player, const ulong pins) {
 		static assert (p == Piece.pawn);
 		const ulong O = ~b.piece[Piece.none];
-		ulong attacker = b.piece[p] & b.color[player];
+		ulong attacker = b.piece[p] & b.color[player] & ~pins;
+		const int [2] diag = [9, -9];
+		const int [2] antidiag = [7, -7];
 
 		while (attacker) {
 			Square x = popSquare(attacker);
 			attackFromSquare[x] = Board.coverage!p(x, O, player);
 			attackByPlayer[player] |= attackFromSquare[x];
 		}
+
+		attacker = b.piece[p] & b.color[player] & pins;
+		while (attacker) {
+			const Square x = popSquare(attacker);
+			const Color c = toColor(b[x]);
+			const int d = Board.mask[b.xKing[c]].direction[x];
+			if (d == 9)  attackByPlayer[c] |= attackFromSquare[x] = Board.mask[x + diag[c]].bit;
+			else if (d == 7)  attackByPlayer[c] |= attackFromSquare[x] = Board.mask[x + antidiag[c]].bit;
+			else attackFromSquare[x] = 0;
+		}
 	}
 
 	/* compute a bitboard of all squares attacked by a type of piece */
-	void setCoverage(Piece p)(const Board b) {
+	void setCoverage(Piece p)(const Board b, const ulong pins) {
 		static assert (p != Piece.pawn);
 		const ulong O = ~b.piece[Piece.none];
-		ulong attacker = b.piece[p];
+		ulong attacker = b.piece[p] & ~pins;
 
 		while (attacker) {
 			const Square x = popSquare(attacker);
@@ -192,20 +249,38 @@ private:
 			attackFromSquare[x] = Board.coverage!p(x, O);
 			attackByPlayer[c] |= attackFromSquare[x];
 		}
+
+		attacker = b.piece[p] & pins;
+		while (attacker) {
+			const Square x = popSquare(attacker);
+			const Color c = toColor(b[x]);
+			const int d = Board.mask[b.xKing[c]].direction[x];
+
+			attackFromSquare[x] = 0;
+			static if (p == Piece.bishop || p == Piece.queen) {
+				if (d == 9)  attackByPlayer[c] |= attackFromSquare[x] = Board.diagonalAttack(O, x);
+				else if (d == 7)  attackByPlayer[c] |= attackFromSquare[x] = Board.antidiagonalAttack(O, x);
+			}	
+			static if (p == Piece.rook || p == Piece.queen) {
+				if (d == 1)  attackByPlayer[c] |= attackFromSquare[x] = Board.rankAttack(O, x);
+				else if (d == 8)  attackByPlayer[c] |= attackFromSquare[x] = Board.fileAttack(O, x);
+			}
+		}
 	}
 
 	/* init the attackFromSquare[], attackByPlayer[] arrays */
 	void initAttack(const Board b) {
 		attackByPlayer[] = 0;
+	
+		pins = b.pins | b.setPins(opponent(b.player));
 
-		setCoverage!(Piece.pawn)(b, Color.white);
-		setCoverage!(Piece.pawn)(b, Color.black);
-		setCoverage!(Piece.knight)(b);
-		setCoverage!(Piece.bishop)(b);
-		setCoverage!(Piece.rook)(b);
-		setCoverage!(Piece.queen)(b);
-		setCoverage!(Piece.king)(b);
-
+		setCoverage!(Piece.pawn)(b, Color.white, pins);
+		setCoverage!(Piece.pawn)(b, Color.black, pins);
+		setCoverage!(Piece.knight)(b, pins);
+		setCoverage!(Piece.bishop)(b, pins);
+		setCoverage!(Piece.rook)(b, pins);
+		setCoverage!(Piece.queen)(b, pins);
+		setCoverage!(Piece.king)(b, pins);
 	}
 
 	/* mobility / attack / defense evaluation components */
@@ -215,7 +290,7 @@ private:
 		const ulong E = b.color[enemy];
 		const ulong V = b.piece[Piece.none];
 		const ulong A = attackByPlayer[enemy];
-		ulong attacker = b.piece[p] & P, a;
+		ulong attacker = b.piece[p] & P, a, pawns;
 		const Stack *s = &stack[ply];
 		Value v;
 		Square x;
@@ -226,7 +301,13 @@ private:
 			}
 
 			static if (p == Piece.pawn) { //  pawns' pushes
-				a = player == Color.white ? attacker << 8 : attacker >> 8;
+				a = attacker & pins;
+				pawns = attacker & ~pins;
+				while (a) {
+					x = popSquare(a);
+					if (Board.mask[b.xKing[player]].direction[x] == 8) pawns |= Board.mask[x].bit;
+				}
+				a = player == Color.white ? pawns << 8 : pawns >> 8;
 				if (a) {
 					v += coeff.safePawnAdvance * countBits(a & V & ~A); //  on empty squares
 					v += coeff.unsafePawnAdvance * countBits(a & V & A);
@@ -240,15 +321,17 @@ private:
 			do {
 				x = popSquare(attacker);
 				a = attackFromSquare[x];
-				v += coeff.safeMobility[p] * countBits(a & V & ~A);  // moves on empty squares
+				v += coeff.safeMobility[p]   * countBits(a & V & ~A); // moves on empty squares
 				v += coeff.unsafeMobility[p] * countBits(a & V & A);
-				v += coeff.safeAttack[p] * countBits(a & E & ~A);    // attacks opponent pieces
-				v += coeff.unsafeAttack[p] * countBits(a & E & A);
-				v += coeff.safeDefense[p] * countBits(a & P & ~A);   // defends own pieces.
-				v += coeff.unsafeDefense[p] * countBits(a & P & A);
+				v += coeff.safeAttack[p]     * countBits(a & E & ~A); // attacks opponent pieces
+				v += coeff.unsafeAttack[p]   * countBits(a & E & A);
+				v += coeff.safeDefense[p]    * countBits(a & P & ~A); // defends own pieces.
+				v += coeff.unsafeDefense[p]  * countBits(a & P & A);
+				v += coeff.centerControl[p]  * countBits(a & center); // center control.
 				static if (p != Piece.king) {
 					v += coeff.kingAttack[p] * countBits(a & s.kingZone[enemy]); // pieces attacking opponent king neighbourhood
 				}
+			
 			} while (attacker);
 		}
 
@@ -348,7 +431,7 @@ private:
 				if (b.mask[x].bit & storm)  vStorm  += attraction(x, k[enemy]);
 			} while (attacker);
 
-			v.opening += to!int(coeff.kingShield.opening * vShield + coeff.kingStorm.opening * vStorm);
+			v += coeff.kingShield * vShield + coeff.kingStorm * vStorm;
 		}
 
 		return v;
@@ -374,8 +457,7 @@ private:
 		}
 
 		void displayShieldStorm(string msg, const double s, const Value c) {
-			Value v;
-			v.opening = to!int(c.opening * s);
+			Value v = c * s;
 			output(msg, v);
 		}
 
@@ -417,9 +499,7 @@ private:
 		const ulong pawns = b.piece[Piece.pawn];
 		const ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
 		const ulong attacker = pawn[player];
-		Value v;
-
-		Value mat, pos;
+		Value v, mat, pos;
 
 		// open file ?
 		if ((pawns & b.mask[x].openFile[player]) == 0) {
@@ -456,12 +536,53 @@ private:
 		return v;
 	}
 
+	
+	/* drawish position */
+	Value bound(const Board b, const Value value) const {
+		const Stack *s = &stack[ply];
+		const int v = sign(value);
+		const Value draw = {v, v};
+
+		// some pawn free drawish position
+		if (s.stage <= 23) {
+			foreach (i; 0 .. 15) {
+				if ((drawishTable[i][0] == s.materialIndex[0] && drawishTable[i][1] == s.materialIndex[1])
+				 || (drawishTable[i][1] == s.materialIndex[0] && drawishTable[i][0] == s.materialIndex[1])) return draw;
+			}
+		}
+		// some minor vs pawn not winning position
+		if (s.stage <= 6) {
+			foreach (i; 0 .. 3) {
+				if ((boundTable[i] == s.materialIndex[b.player] && v > 0) 
+				 || (boundTable[i ]== s.materialIndex[opponent(b.player)] && v < 0)) return draw;
+			}
+		}
+		// king vs king + pawn
+		if (s.stage == 0) return kpk.rescale(b, value);
+
+		// fifty move rule
+		if (b.fifty > 50) { // diminish value when fifty move rule approach
+			if (b.fifty >= 100) return draw;
+			return value * (100 - b.fifty) / 50;
+		}
+
+		return value;
+	}
+
 	/* convert value to centipawns */
 	int toCentipawns(const Value value) const {
 		const Stack *s = &stack[ply];
 		int v = value.opening * s.stage + value.endgame * (64 - s.stage);
 		if (v < 0) v -= halfcentipawn; else if (v > 0) v += halfcentipawn;
 		return v / centipawn;
+	}
+
+	/* convert value to centipawns */
+	int sign(const Value value) const {
+		const Stack *s = &stack[ply];
+		int v = value.opening * s.stage + value.endgame * (64 - s.stage);
+		if (v < 0) v = -1; else if (v > 0) v = +1;
+		return v;
 	}
 
 	/* eval a single square */
@@ -594,8 +715,9 @@ public:
 		coeff.unsafePawnBlock.opening   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeAttack[p].opening    = scale(w[i++]);
 		coeff.safePawnDouble.opening    = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeDefense[p].opening     = scale(w[i++]);
 		coeff.unsafePawnDouble.opening  = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeDefense[p].opening   = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.kingAttack[p].opening      = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.kingDefense[p].opening     = scale(w[i++]);
+		foreach(p; Piece.pawn .. Piece.size) coeff.centerControl[p].opening = scale(w[i++]);
+		foreach(p; Piece.pawn .. Piece.king) coeff.kingAttack[p].opening    = scale(w[i++]);
+		foreach(p; Piece.pawn .. Piece.king) coeff.kingDefense[p].opening   = scale(w[i++]);
 
 		// king shield / storm
 		coeff.kingShield.opening = scale(w[i++]);
@@ -654,8 +776,13 @@ public:
 		coeff.unsafePawnBlock.endgame   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeAttack[p].endgame    = scale(w[i++]);
 		coeff.safePawnDouble.endgame    = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.safeDefense[p].endgame     = scale(w[i++]);
 		coeff.unsafePawnDouble.endgame  = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.unsafeDefense[p].endgame   = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.kingAttack[p].endgame      = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.kingDefense[p].endgame     = scale(w[i++]);
+		foreach(p; Piece.pawn .. Piece.size) coeff.centerControl[p].endgame = scale(w[i++]);
+		foreach(p; Piece.pawn .. Piece.king) coeff.kingAttack[p].endgame    = scale(w[i++]);
+		foreach(p; Piece.pawn .. Piece.king) coeff.kingDefense[p].endgame   = scale(w[i++]);
+
+		// king shield / storm
+		coeff.kingShield.opening = scale(w[i++]);
+		coeff.kingStorm.opening  = scale(w[i++]);
 
 		// positional
 		buildPositional!"endgame"(coeff.positional[Piece.pawn],   pawnAdvance,  w[i++], true);
@@ -685,11 +812,11 @@ public:
 	/* resize the pawn hash table */
 	void resize(size_t size) {
 		pawnTable.length = 1 << lastBit(size / PawnEntry.sizeof);
-		debug writefln("pawnTT size: %s -> entry.length: %s -> size: %s", size, pawnTable.length, pawnTable.length * PawnEntry.sizeof);
+		clear();
 	}
 
 	/* Constructor (initialize evaluation weights & allocate pawnhash table) */
-	this(const ref double [] w = weight.initialWeights, const size_t size = 2 * 1024 * 1024) {
+	this(const size_t size = 2 * 1048 * 1048, const ref double [] w = weight.initialWeights) {
 		// allocate the pawn hash table.
 		resize(size);
 
@@ -757,6 +884,9 @@ public:
 		writefln("  lazy  %+5d", opCall(board));
 		writefln("  full  %+5d", opCall(board, Score.low, Score.high));
 
+		writeln("materialIndex : QRBNP- qrbnp-");
+		writefln("                %06x %06x", stack[ply].materialIndex[0], stack[ply].materialIndex[1]);
+
 		writeln("Pawn structure:"); foreach (c; Color.white .. Color.size)  showPawnStructure(board, c);
 		showBoard("Eval per square", board);
 	}
@@ -777,14 +907,14 @@ public:
 
 		foreach(Color c; Color.white .. Color.size) {
 			s.nPiece[c] = countBits(board.color[c] & ~board.piece[Piece.pawn]);
+			s.materialIndex[c] = 0;
 			foreach(Piece p; Piece.pawn .. Piece.size) {
 				ulong b = board.color[c] & board.piece[p];
 				const n = countBits(b);
 				s.stage += stageValue[p] * n;
 				s.value[c] += coeff.material[p] * n;
-				if (p == Piece.bishop && n >= 2) {
-					s.value[c] += coeff.bishopPair;
-				}
+				if (p < Piece.king) s.materialIndex[c] += n << (4 * p);
+				if (p == Piece.bishop && n >= 2) s.value[c] += coeff.bishopPair;
 				if (p == Piece.king) {
 					Square x = firstSquare(b);
 					s.kingZone[c] = Board.mask[x].king;
@@ -795,11 +925,8 @@ public:
 				}
 			}
 		}
-		if (s.nPiece[Color.white] > s.nPiece[Color.black]) {
-			s.value[Color.white] += coeff.materialImbalance;
-		} else if (s.nPiece[Color.white] < s.nPiece[Color.black]) {
-			s.value[Color.black] += coeff.materialImbalance;
-		}
+		if (s.nPiece[Color.white] > s.nPiece[Color.black]) s.value[Color.white] += coeff.materialImbalance;
+		else if (s.nPiece[Color.white] < s.nPiece[Color.black]) s.value[Color.black] += coeff.materialImbalance;
 	}
 
 	/* update the evaluation (material & positional) after a move */
@@ -863,7 +990,7 @@ public:
 		return toCentipawns(value);
 	}
 
-	/* functor: lazy evaluation */
+	/* functor: lazy evaluation change after a move */
 	int opCall(const Board b, const Move m) const {
 		const Color player = b.player;
 		const Color enemy = opponent(player);
@@ -897,13 +1024,8 @@ public:
 			value += pawnStructure(b);
 		}
 
-		// some value corrections
-		value = kpk.rescale(b, value); // kpk table
-
-		if (b.fifty > 50) { // diminish value when fifty move rule approach
-			if (b.fifty >= 100) value = Value.init;
-			else value *= (100 - b.fifty) / 50;
-		}
+		// some value corrections for drawish positions
+		value = bound(b, value);
 
 		return toCentipawns(value);
 	}
