@@ -45,7 +45,6 @@ private:
 		}
 	}
 
-
 public:
 	/* constructor */
 	this(string [] c) {
@@ -282,10 +281,10 @@ public:
 	}
 
 	/* compute llr for a given variance */
-	bool LLR(const double v) const {
+	int LLR(const double v) const {
 		ulong n = w + d + l;
 		double score = (w + 0.5 * d) / n;
-		bool end = true;
+		int end = 0;
 		double σ = sqrt(v);
 		double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
 		double los = v > 0.0 ? normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ) : 0.5;
@@ -294,9 +293,15 @@ public:
 		writefln("LOS: %.2f %%", 100.0 * los);
 		writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
 
-		if (llr < llr0) writeln("test rejected");
-		else if (llr > llr1) writeln("test accepted");
-		else end = false;
+		if (llr < llr0) {
+			writeln("test rejected");
+			end = -1;
+		} else if (llr > llr1) {
+			writeln("test accepted");
+			end = 1;
+		} else {
+			end = 0;
+		}
 		writeln();
 
 		return end;
@@ -304,8 +309,8 @@ public:
 
 
 	/* stop if llr condition are met */
-	bool stop(const Var v) const {
-		bool end = false;
+	int stop(const Var v) const {
+		int end = 0;
 
 		if (v & Var.pentanomial) {
 			writeln("Using variance of the pentanomial distribution of game pairs:");
@@ -314,13 +319,13 @@ public:
 
 		if (v & Var.trinomial) {
 			writeln("Using variance of the trinomial distribution of single games:");
-			if (v & Var.pentanomial) end &= LLR(var3()); else end = LLR(var3());
+			int e = LLR(var3());
+			if ((v & Var.pentanomial) && (e != end)) end = 0; else end = e;
 		}
 
 		return end;
 	}
 }
-
 
 /*
  * A pool of engines running const parallel...
@@ -333,7 +338,7 @@ private:
 	SPRT sprt;
 
 	/* play a pair of matches, each engine playing white & black */
-	bool match(const int i, const shared Game opening, const double time, const Var v) {
+	int match(const int i, const shared Game opening, const double time, const Var v) {
 		auto w = taskPool.workerIndex;
 		auto m1 = new Match([player[w], opponent[w]], opening, time);
 		auto m2 = new Match([opponent[w], player[w]], opening, time);
@@ -410,10 +415,72 @@ public:
 	void loop(const int nGames, const double time, const Var v) {
 		shared bool done = false;
 		foreach (i; taskPool.parallel(iota(nGames))) {
-			if (!done) done = match(i, openings.next(true), time, v);
+			if (!done) done = (match(i, openings.next(true), time, v) != 0);
 		}
 		taskPool.finish(true);
 	}
+}
+
+/*
+ * sprt Simulation
+ */
+void simulation(const uint nSimulation, const uint nGames, const double draw, const double whiteAdvantage, const double H0, const double H1, const double α, const double β, const Var v) {
+	Random r;
+	double [3] W;
+	double [3] B;
+	double p;
+	int [2] s;
+	int result;
+	std.stdio.File f;
+	ulong [3] outcome;
+	ulong tGames;
+
+	r.seed(unpredictableSeed);
+
+	f.open("simulation.txt", "w");	
+
+	for (double elo = -20; elo <= 20; elo += 0.1)  {
+		const double a = 0.005 * whiteAdvantage, d = 0.01 * draw;
+		const double w = max(0, min(1, (SPRT.proba(elo) - d / 2)));
+
+		outcome = [0, 0, 0];
+		tGames = 0;
+
+		W[0] = max(0, min(1, w + a));
+		W[1] = min(1 - W[0], d);
+		W[2] = 1 - W[0] - W[1];
+
+		B[0] = max(0, min(1, w - a));
+		B[1] = min(1 - B[0], d);
+		B[2] = 1 - B[0] - B[1];
+	
+		foreach (i; 0 .. nSimulation) {
+
+			SPRT sprt = SPRT(H0,  H1, α, β);
+			sprt.setEngineNames(["engine 1", "engine 2"]);
+
+			foreach (j; 0 .. nGames) {
+				++tGames;
+				p = uniform01(r);
+				if (p < W[0])  s[0] = 2; else if (p < W[0] + W[1]) s[0] = 1; else s[0] = 0;
+				p = uniform01(r);
+				if (p < B[0])  s[1] = 2; else if (p < B[0] + B[1]) s[1]= 1; else s[1] = 0;
+				sprt.record(s);
+				if ((result = sprt.stop(v)) != 0) break;
+			}
+	
+			++outcome[result + 1];
+		}
+
+		double n = outcome[0] + outcome[1] + outcome[2];
+
+		stderr.writefln("Simulation for elo diff: %.2f; draw percentage %.2f%%; white advantage %.2f%%", elo, draw, whiteAdvantage);
+		stderr.writeln("White proba: ", W, " ; Black proba: ", B);
+		stderr.writefln("%s simulations, %s game pairs", nSimulation, tGames);
+		stderr.writefln("rejected: %.4f, undecided: %.4f, accepted: %.4f", outcome[0] / n, outcome[1] / n, outcome[2] / n);
+		f.writeln(elo, ", ", outcome[0] / n, ", ", outcome[1] / n, ", ", outcome[2] / n, ", ", tGames);
+	}
+
 }
 
 
@@ -423,16 +490,17 @@ public:
 void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
-	int nGames = 30000, nCpu = 1, nRandom;
+	int nGames = 30000, nCpu = 1, nRandom, nSimulation = 0;
 	bool showVersion, showHelp, showDebug;
 	string [] engineName, openingFile;
 	string outputFile, var;
-	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05;
+	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0;
 	Var v;
 
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time,
 		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
+		"simulation", &nSimulation, "draw", &draw, "white", &white,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
 		"debug|d", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
@@ -453,6 +521,9 @@ void main(string [] args) {
 		writeln("    --alpha <alpha>          type I error (default = 0.05)");
 		writeln("    --beta  <beta>           type II error (default = 0.05)");
 		writeln("    --variance|-v <type>     none|3nomial|5nomial|all (default=all) ");
+		writeln("    --simulation|s <n>       run <n> simulations (default: 0)");
+		writeln("    --draw  <%draw>          draw percentage to use during a simulation (0 to 100: default 40)");
+		writeln("    --white  <%draw>         white advantage to use during a simulation (0 to 30: default 10)");
 		writeln("    --debug                  allow debugging by the engine to a log file");
 		writeln("    --help|-h                display this help");
 		writeln("    --version                show version number");
@@ -468,7 +539,7 @@ void main(string [] args) {
 		writeln("test accepted");
 	}
 
-	if (engineName.length != 2) {
+	if (nSimulation == 0 && engineName.length != 2) {
 		if (!showVersion && !showHelp) stderr.writeln("Two engines and only two needed");
 		return;
 	}
@@ -479,16 +550,25 @@ void main(string [] args) {
 	else if (var == "none") v = Var.none;
 	else v = Var.all;
 
-	// init
-	nCpu = max(0, min(nCpu - 1, totalCPUs - 1));
-	defaultPoolThreads(nCpu);
-	if (nRandom > 0) engines = new EnginePool(engineName, nRandom, nGames, outputFile, H0, H1, α, β);
-	else engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
+	// run a simulation
+	if (nSimulation > 0) {
+		white = max(0, min(30, white));
+		draw = max(0, min(100, draw));
+		simulation(nSimulation, nGames, draw, white, H0,  H1, α, β, v);
 
-	// run the tournament
-	engines.start(showDebug);
-	engines.loop(nGames, time, v);
-	engines.end();
+	// run a tournament between 2 engines
+	} else {
+		// init
+		nCpu = max(0, min(nCpu - 1, totalCPUs - 1));
+		defaultPoolThreads(nCpu);
+		if (nRandom > 0) engines = new EnginePool(engineName, nRandom, nGames, outputFile, H0, H1, α, β);
+		else engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
+
+		// run the tournament
+		engines.start(showDebug);
+		engines.loop(nGames, time, v);
+		engines.end();
+	}
 }
 
 unittest {
