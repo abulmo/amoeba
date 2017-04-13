@@ -663,8 +663,46 @@ private:
 	}
 
 public:
+	/* Compute pins */
+	ulong setPins(const Color c) const {
+		const Color enemy = opponent(c);
+		const Square k = xKing[c];
+		const ulong bq = (piece[Piece.bishop] + piece[Piece.queen]) & color[enemy];
+		const ulong rq = (piece[Piece.rook] + piece[Piece.queen]) & color[enemy];
+		const ulong occupancy = ~piece[Piece.none];
+		ulong partialCheckers, pins;
+		ulong b;
+		Square x;
+
+		// bishop or queen
+		b = coverage!(Piece.bishop)(k, occupancy);
+		partialCheckers = b & bq;
+		b &= color[c];
+		if (b) {
+			b = attack!(Piece.bishop)(k, bq ^ partialCheckers, occupancy ^ b);
+			while (b) {
+				x = popSquare(b);
+				pins |= mask[k].between[x] & color[c];
+			}
+		}
+
+		// rook or queen: all square reachable from the king square.
+		b = coverage!(Piece.rook)(k, occupancy);
+		partialCheckers = b & rq;
+		b &= color[c];
+		if (b) {
+			b = attack!(Piece.rook)(k, rq ^ partialCheckers, occupancy ^ b);
+			while (b) {
+				x = popSquare(b);
+				pins |= mask[k].between[x] & color[c];
+			}
+		}
+
+		return pins;
+	}
+
 	/* Compute pins & checkers */
-	void setPinsCheckers(ref ulong checkers, ref ulong pins, const Color player) const {
+	void setPinsCheckers(ref ulong checkers, ref ulong pins) const {
 		const Color enemy = opponent(player);
 		const Square k = xKing[player];
 		const ulong bq = (piece[Piece.bishop] + piece[Piece.queen]) & color[enemy];
@@ -857,7 +895,7 @@ public:
 		}
 
 		piece[Piece.none] = ~(color[Color.white] | color[Color.black]);
-		setPinsCheckers(stack[ply].checkers, stack[ply].pins, player);
+		setPinsCheckers(stack[ply].checkers, stack[ply].pins);
 		stack[ply].key.set(this);
 		stack[ply].pawnKey.set(this);
 
@@ -993,7 +1031,7 @@ public:
 		}
 
 		// fifty move rule
-		if (stack[ply].fifty > 100) return Result.fiftyDraw;
+		if (stack[ply].fifty >= 100) return Result.fiftyDraw;
 
 		// lack of mating material
 		if (piece[Piece.pawn] + piece[Piece.rook] + piece[Piece.queen] == 0) {
@@ -1141,7 +1179,7 @@ public:
 		}
 
 		player = enemy;
-		setPinsCheckers(n.checkers, n.pins, player);
+		setPinsCheckers(n.checkers, n.pins);
 		++ply;
 
 		debug claim(verify());
