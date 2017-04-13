@@ -93,7 +93,6 @@ final class TranspositionTable {
 			mask = l - 1;
 			entry.length = mask + bucketSize;
 		}
-		debug writefln("size: %s -> mask: %s, entry.length: %s -> size: %s", size, mask, entry.length, entry.length * Entry.sizeof);
 	}
 
 	/* clear the table */
@@ -255,7 +254,7 @@ private:
 
 			foreach (i; 0 .. multiPv) {
 				auto d = depth - (i > iPv);
-				s = "info depth " ~ to!string(d);
+				s ~= "info depth " ~ to!string(d);
 				if (multiPv > 1) s ~= " multipv " ~ to!string(i + 1);
 				s ~= " score ";
 				if (score[i] > Score.high) s ~= "mate " ~ to!string((Score.mate + 1 - score[i]) / 2);
@@ -326,7 +325,7 @@ private:
 
 	/* clear heuristics */
 	void heuristicsClear() {
-		foreach (ref k; killer) k = 0;
+		foreach (ref k; killer) k = [0, 0];
 		foreach (ref r; refutation) r = 0;
 		history.clear();
 	}
@@ -340,7 +339,7 @@ private:
 
 		if (ply > 0) refutation[line.top & Limits.move.mask] = m;
 
-		history.update(board, m, d * d);
+		history.updateGood(board, m, d * d);
 	}
 
 	/* update a move */
@@ -534,10 +533,13 @@ private:
 			// best move ?
 			if (s > bs && (bs = s) > α) {
 				tt.store(board.key, d, ply, tt.bound(bs, β), bs, m);
-				if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
 				if (isPv) pv[ply].set(m, pv[ply + 1]);
-				if ((α = bs) >= β) return bs;
+				if ((α = bs) >= β) {
+					if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
+					return bs;
+				}
 			}
+			if (!board.isTactical(m) && !board.inCheck) history.updateBad(board, m, d * d);
 		}
 
 		// no moves: mate or stalemate.
@@ -590,12 +592,15 @@ private:
 				info.update(nNodes, d, time);
 				info.store(iPv, bs, pv[0]);
 				if (iPv == 0) tt.store(board.key, d, 0, tt.bound(bs, β), bs, m);
-				if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
-				if ((α = bs) >= β) break;
+				if ((α = bs) >= β) {
+					if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
+					break;
+				}
 			} else if (i == iPv) {
 				pv[0].set(m, pv[1]);
 				info.store(iPv, s, pv[0]);
 			}
+			if (!board.isTactical(m) && !board.inCheck) history.updateBad(board, m, d * d);
 		}
 
 		if (!stop && iPv == 0 && bs <= αOld) tt.store(board.key, d, ply, Bound.upper, bs, rootMoves[0]);
@@ -675,10 +680,11 @@ public:
 	/* constructor: allocate the transposition table & set some options */
 	this(size_t size = 64 * 1024 * 1024) {
 		board = null;
-		eval = new Eval;
+		eval = new Eval(size / 32);
 		tt = new TranspositionTable(size);
 		message = null;
 		option.verbose = true;
+		clear();
 	}
 
 	/* clear search caches */
@@ -842,7 +848,7 @@ int epdTest(string [] arg, const bool checkSolution = true) {
 	termination.depth.max = min(d, Limits.ply.max);
 	termination.nodes.max = ulong.max;
 	moves.clear();
-	ttSize = min(4096, max(1, ttSize));
+	ttSize = min(65536, max(1, ttSize));
 	Search s = new Search(ttSize * 1024 * 1024);
 	s.message = new shared Message("Amoeba-epdtest");
 	if (dbg) s.message.logOn();
@@ -859,6 +865,7 @@ int epdTest(string [] arg, const bool checkSolution = true) {
 			writeln();
 			writeln(b);
 		}
+		s.clear();
 		s.set(b);
 		s.go(termination, moves);
 		if (checkSolution && epdMatch(epd, b, s.bestMove)) ++nGoods;
@@ -871,7 +878,7 @@ int epdTest(string [] arg, const bool checkSolution = true) {
 
 	if (checkSolution) writef("epd: %d founds / %d problems ", nGoods, n);
 	else writef("bench: %d positions ", n);
-	writefln(" %d nodes const %.3fs : %.0f nps, depth = %.2f", N, T, N / T, D / n);
+	writefln(" %d nodes in %.3fs : %.0f nps, depth = %.2f", N, T, N / T, D / n);
 	stdout.flush();
 
 	return (100 * nGoods) / n;
