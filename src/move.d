@@ -7,7 +7,7 @@
 module move;
 
 import board, util;
-import std.stdio, std.ascii, std.format, std.string, std.algorithm;
+import std.stdio, std.ascii, std.format, std.string, std.algorithm, core.stdc.stdlib;
 
 /*
  * Move
@@ -159,49 +159,75 @@ string toSan(const Move move, Board board) {
  * Search history
  */
 struct History {
-	ushort [Square.size][CPiece.size] h;
+	ushort [Square.size][CPiece.size] goodMoves, badMoves;
 	enum short max = 16384;
 	
-	void update(const Board board, const Move m, const uint δ) {
-		debug claim (board.isTactical(m) == false);
-
-		if ((h[board[m.from]][m.to] += δ) > max) {
-			foreach (p; CPiece.wpawn .. CPiece.size)
-			foreach (x; Square.a1 .. Square.size) {
-				h[p][x] /= 2;
-			}
+	void rescale() {
+		foreach (p; CPiece.wpawn .. CPiece.size)
+		foreach (x; Square.a1 .. Square.size) {
+			goodMoves[p][x] /= 2;
+			badMoves[p][x] /= 2;
 		}
+	}
+
+	void updateGood(const Board board, const Move m, const uint δ) {
+		debug claim (board.isTactical(m) == false);
+		if ((goodMoves[board[m.from]][m.to] += δ) > max) rescale();
+	}
+
+	void updateBad(const Board board, const Move m, const uint δ) {
+		debug claim (board.isTactical(m) == false);
+		if ((badMoves[board[m.from]][m.to] += δ) > max) rescale();
 	}
 
 	void clear() {
 		foreach (p; CPiece.wpawn .. CPiece.size)
 		foreach (x; Square.a1 .. Square.size) {
-			h[p][x] = 0;
+			goodMoves[p][x] = badMoves[p][x] = 0;
 		}
 	}
 
 	short value(const CPiece p, const Square to) const {
-		return cast (short) (h[p][to] - max);
+		const int g = goodMoves[p][to], b = badMoves[p][to];
+		if (g + b == 0) return cast (short) -max / 2;
+		else return cast (short) ((goodMoves[p][to] * max) / (goodMoves[p][to] + badMoves[p][to]) - max);
 	}
-}	
+}
 
 /*
- *
+ * MoveItem: a Move and a sorting value
  */
 struct MoveItem {
 	Move move;
 	short value;
 
+	/* Constructor */
 	this(const Move m, const short v) {
 		move = m;
 		value = v;
 	}
 }
 
+/* insertion Sort */
+void insertionSort(MoveItem [] items) {
+	const size_t n = items.length;
+
+	if (n > 1) {
+		foreach (i; 1 .. n) {
+			size_t j;
+			const tmp = items[i];
+		    for (j = i ; j > 0 && tmp.value > items[j - 1].value; j--) {
+				items[j] = items[j - 1];
+			}
+			items[j] = tmp;
+		}
+	}
+}
+
+
 /*
  * Moves : an array of legal moves
  */
-
 struct Moves {
 public:
 	MoveItem [Limits.moves.max] item;
@@ -216,31 +242,34 @@ private:
 	const(History) *history;
 	Stage stage;
 	
-	enum short badSeeMalus = -History.max - vCapture[Piece.king];
 	static immutable short [Piece.size] vPiece = [0, 1, 2, 3, 4, 5, 6];
 	static immutable short [Piece.size] vPromotion = [0, 0, 48, 16, 32, 64, 0];
 	static immutable short [Piece.size] vCapture = [0, 256, 512, 768, 1024, 1280, 1536];
+	enum short badSeeMalus = -History.max - vCapture[Piece.king];
 	enum short ttBonus = 10000;
 	enum short killerBonus = 10;
+	enum to7thRankBonus = 12;
 	enum short doublon = short.min;
 
-	/* select the best move according to its value */
-	void selectValuableMove() {
-		size_t k = index;
-		foreach (i; index + 1 .. n) if (item[i].value > item[k].value) k = i;
-		if (k > index) swap(item[index], item[k]);
+	/* insert item j into i */
+	void insert(const size_t i, const size_t j) {
+		if (i < j) {
+			const MoveItem tmp = item[j];
+			foreach_reverse (k; i .. j) item[k + 1] = item[k];
+			item[i] = tmp;
+		}
 	}
-	
-	/* insert a move & its value at the current index position */
-	void insert(const Move m, const short v) {
+
+	/* include a move & its value at the current index position */
+	void include(const Move m, const short v) {
 		item[n] = MoveItem(m, v);
-		swap(item[index], item[n]);
+		insert(index, n);
 		n++;
 	}
 
 	/* generate & score captures using MVVLVA & punishing bad captures */
 	void generateCapture(Board board) {
-		size_t o = n;
+		const size_t o = n;
 		board.generateMoves!(Generate.capture)(this);
 		foreach(ref i; item[o .. n]) {
 			auto m = i.move;
@@ -250,19 +279,23 @@ private:
 				auto p = toPiece(board[m.from]);
 				auto victim = toPiece(board[m.to]);			
 				i.value = cast (short) (vCapture[victim] + vPromotion[m.promotion] - vPiece[p]);
-				if (i.value == -vPiece[Piece.pawn] && board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
+				if (i.value == -vPiece[Piece.pawn]) {
+					if (board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
+					else i.value = to7thRankBonus; // push to 7
+				}				
 				if ((board.see(m) < 0 && board.giveCheck(m) < 2) || (m.promotion > Piece.pawn && m.promotion < Piece.queen)) {
 					if (captureOnly) i.value = doublon;
 					else i.value += badSeeMalus;
 				}
 			}
 		}
+		insertionSort(item[o .. n]);
 		item[n] = MoveItem.init;
 	}
 
 	/* generate & score quiet moves */
 	void generateQuiet(Board board) {
-		size_t o = n;
+		const size_t o = n;
 		board.generateMoves!(Generate.quiet)(this);
 		foreach (ref i; item[o .. n]) {
 			if (i.move == ttMove[0]) i.value = doublon;
@@ -272,6 +305,7 @@ private:
 			else if (i.move == refutation) i.value = doublon;
 			else i.value = history.value(board[i.move.from], i.move.to);
 		}
+		insertionSort(item[index .. n]);
 		item[n] = MoveItem.init;
 	}
 
@@ -292,6 +326,7 @@ private:
 				}
 			}
 		}
+		insertionSort(item[0 .. n]);
 		item[n] = MoveItem.init;
 	}
 
@@ -349,7 +384,6 @@ public:
 
 		// good-capture selection from best to worst
 		case Stage.captureSelection:
-			selectValuableMove();
 			if (index == n || item[index].value < 0) { // end of good capture
 				stage = Stage.killer1;
 				goto case;
@@ -359,7 +393,7 @@ public:
 		case Stage.killer1:
 			stage = Stage.killer2;
 			if (board.isLegal(killer[0]) && !board.isTactical(killer[0]) && killer[0] != ttMove[0] && killer[0] != ttMove[1]) {
-				insert(killer[0], killerBonus);
+				include(killer[0], killerBonus);
 				break;
 			} else goto case;
 
@@ -367,7 +401,7 @@ public:
 		case Stage.killer2:
 			stage = Stage.refutation;
 			if (board.isLegal(killer[1]) && !board.isTactical(killer[1]) && killer[1] != ttMove[0] && killer[1] != ttMove[1]) {
-				insert(killer[1], killerBonus - 1);
+				include(killer[1], killerBonus - 1);
 				break;
 			} else goto case;
 
@@ -375,7 +409,7 @@ public:
 		case Stage.refutation:
 			stage = Stage.quietGeneration;
 			if (board.isLegal(refutation) && !board.isTactical(refutation) && refutation != ttMove[0] && refutation != ttMove[1] && refutation != killer[0] && refutation != killer[1]) {
-				insert(refutation, killerBonus - 2);
+				include(refutation, killerBonus - 2);
 				break;
 			} else goto case;
 
@@ -393,22 +427,21 @@ public:
 
 		// move selection from best to worst
 		case Stage.moveSelection:
-			selectValuableMove();
 			if (item[index].value == doublon) { // already done, stop here.
 				item[index] = MoveItem.init;
 				n = index;
 			}
 			break;
 		}
-		debug claim(verify(board));
+		debug claim(verify(board, index));
 
 		return item[index++];
 	}
 
 	/* verify that te current move is legal and has not been played yet */
-	bool verify(Board board) const {
-		Move m = item[index].move;
-		int v = item[index].value;
+	bool verify(Board board, size_t i) const {
+		Move m = item[i].move;
+		int v = item[i].value;
 
 		bool error(string msg) {
 			stderr.writeln(board);
@@ -417,14 +450,14 @@ public:
 			return false;
 		}
 
-		if (index == n && m == 0) return true;
+		if (i == n && m == 0) return true;
 		
 		if (!m) return error(" is null");
 		if (v == doublon) return error(" has doublon value");
 		if (v > ttBonus || v < badSeeMalus - vPiece[Piece.pawn]) return error(" unexpected value");
 		if (!board.isLegal(m)) return error("is illegal");
-		foreach (i; item[0 .. index]) {
-			if (i.move == m) return error(" is a doublon");
+		foreach (d; item[0 .. i]) {
+			if (d.move == m) return error(" is a doublon");
 		}
 		return true;
 	}
@@ -437,9 +470,8 @@ public:
 	/* insert a move as ith move */
 	void setBest(const Move m, const size_t i = 0) {
 		foreach (j; 0 .. n) if (m == item[j].move) {
-			const MoveItem tmp = item[j];
-			foreach_reverse (k; i .. j) item[k + 1] = item[k];
-			item[i] = tmp;
+			insert(i, j);
+			break;
 		}
 	}
 
