@@ -91,7 +91,7 @@ build-pgo :
 	$(MAKE) clean
 	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
 	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft --depth=6 | grep perft; 
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench --depth=12 --file bk.epd
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench --depth=14 --file bk.epd
 	$(PGO_MERGE)
 	$(DC) $(DFLAGS) $(PGO_USE) $(SRC)
 
