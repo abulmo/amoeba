@@ -89,19 +89,22 @@ private:
 	}
 
 	static immutable int [Piece.size] stageValue = [0, 0, 3, 3, 5, 10, 0];
-	static immutable uint [Color.size][15] drawishTable = [
+	static immutable uint [Color.size][18] drawishTable = [
 		// QRBNP-    qrbnp-
 		[0x000200, 0x000000], // 2 knights
 		[0x001100, 0x000100], // bishop + knight vs knight
 		[0x002000, 0x000100], // 2 bishops vs knight
-		[0x002000, 0x000100], // 2 knights vs knight
-		[0x002000, 0x001000], // 2 knights vs bishop
+		[0x000200, 0x000100], // 2 knights vs knight
+		[0x000200, 0x001000], // 2 knights vs bishop
 		[0x010000, 0x010000], // rook vs rook
 		[0x010000, 0x001000], // rook vs bishop
-		[0x010000, 0x001000], // rook vs knight
+		[0x010000, 0x000100], // rook vs knight
 		[0x011000, 0x010000], // rook + bishop vs rook
 		[0x010100, 0x010000], // rook + knight vs rook
 		[0x100000, 0x100000], // queen vs queen
+		[0x100000, 0x020000], // queen vs 2 rooks
+		[0x100000, 0x011000], // queen vs rook & bishop
+		[0x100000, 0x010100], // queen vs rook & knight
 		[0x100000, 0x002000], // queen vs 2 bishops
 		[0x100000, 0x000200], // queen vs 2 knights
 		[0x100100, 0x100000], // queen + knight vs queen
@@ -545,16 +548,16 @@ private:
 
 		// some pawn free drawish position
 		if (s.stage <= 23) {
-			foreach (i; 0 .. 15) {
-				if ((drawishTable[i][0] == s.materialIndex[0] && drawishTable[i][1] == s.materialIndex[1])
-				 || (drawishTable[i][1] == s.materialIndex[0] && drawishTable[i][0] == s.materialIndex[1])) return draw;
+			foreach (d; drawishTable[0 .. $]) {
+				if ((d[0] == s.materialIndex[0] && d[1] == s.materialIndex[1])
+				 || (d[1] == s.materialIndex[0] && d[0] == s.materialIndex[1])) return draw;
 			}
 		}
 		// some minor vs pawn not winning position
 		if (s.stage <= 6) {
 			foreach (i; 0 .. 3) {
 				if ((boundTable[i] == s.materialIndex[b.player] && v > 0) 
-				 || (boundTable[i ]== s.materialIndex[opponent(b.player)] && v < 0)) return draw;
+				 || (boundTable[i]== s.materialIndex[opponent(b.player)] && v < 0)) return draw;
 			}
 		}
 		// king vs king + pawn
