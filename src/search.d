@@ -393,7 +393,7 @@ private:
 		const αOld = α;
 		if (!board.inCheck) {
 			v = eval(board, α, β);
-			if (h.date > 0 && ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v))) v = s;
+			if (h.info > 0 && ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v))) v = s;
 			if (v > bs && (bs = v) > α) {
 				tt.store(board.key, 0, ply, tt.bound(bs, β), bs, h.move[0]);
 				if ((α = bs) >= β) return bs;
@@ -429,7 +429,7 @@ private:
 	/* alpha-beta search (PVS/negascout variant) */
 	int αβ(int α, int β, const int d, const bool doPrune = true) {
 		const bool isPv = (α + 1 < β);
-		int s, bs, e, r, iQuiet;
+		int v, s, bs, e, r, iQuiet;
 		Moves moves = void;
 		Move m;
 		MoveItem i;
@@ -471,11 +471,14 @@ private:
 			const  δ = 200 * d - 100;
 			const sα = α - δ;
 			const sβ = β + δ;
-			s = eval(board);
+
+			v = eval(board);
+			if (h.info > 0 && ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v))) v = s;
+			
 			// eval pruning (our position is very good, no need to search further)
-			if (s >= sβ) return β;
+			if (v >= sβ) return β;
 			// razoring (our position is so bad, no need to search further)
-			else if (s <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
+			else if (v <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
 
 			// null move
 			if (d >= 2 && line.top && (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king]))) {
@@ -510,16 +513,26 @@ private:
 		while ((m = (i = moves.selectMove(board)).move) != 0) {
 			if (isPv) pv[ply + 1].clear();
 			const bool isTactical = (i.value > 0);
+			const bool isQuiet = !(isTactical || hasThreats || board.giveCheck(m));
+			iQuiet += isQuiet;
+
+			// late move pruning
+			if (isQuiet && !isPv && iQuiet > 4 + d * d) continue;
+
+			// see pruning
+			if (!hasThreats && !isPv && d < 2 && iQuiet > 4 && board.see(m) < 0) continue;
+
 			// check extension (if move is not losing)
 			e = (board.inCheck && board.see(m) >= 0);
+
 			update(m);
 				// principal variation search (pvs)
 				if (moves.isFirst(m)) {
 					s = -αβ(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
-					if (hasThreats || isTactical || board.inCheck) r = 0;
-					else if (iQuiet++ <= 3) r = 1;
+					if (!isQuiet) r = 0;
+					else if (iQuiet <= 4) r = 1;
 					else r = 1 + d / 4;
 					// null window search (nws)
 					s = -αβ(-α - 1, -α, d + e - r - 1);
@@ -530,6 +543,7 @@ private:
 				}
 			restore(m);
 			if (stop) break;
+
 			// best move ?
 			if (s > bs && (bs = s) > α) {
 				tt.store(board.key, d, ply, tt.bound(bs, β), bs, m);
