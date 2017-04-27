@@ -10,7 +10,7 @@ import board, eval, move, search, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
 
 /* version */
-enum string versionNumber = "2.4";
+enum string versionNumber = "2.4.1";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -23,6 +23,7 @@ string arch() @property {
 	a ~= to!string(8 * size_t.sizeof);
 	
 	version (withPopCount) a ~= "p";
+	else version(ARM) a ~='a';
 
 	return a;
 }
