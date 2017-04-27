@@ -746,8 +746,8 @@ public:
 	static ulong rankAttack(const ulong occupancy, const Square x) {
 		const int f = x & 7;
 		const int r = x & 56;
-		const ulong o = (occupancy >> r) & 126;
-		return ulong(ranks[o * 4  + f]) << r;
+		const int o = (occupancy >> r) & 126;
+		return (cast (ulong) (ranks[o * 4  + f])) << r;
 	}
 
 	/* Slider attack along a file */
