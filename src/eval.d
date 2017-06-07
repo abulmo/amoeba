@@ -61,19 +61,20 @@ private:
 	struct Weight {
 		Value [Piece.size] material;
 		Value [Square.size][Piece.size] positional;
-		Value safePawnAdvance, unsafePawnAdvance;
-		Value safePawnBlock, unsafePawnBlock;
-		Value safePawnDouble, unsafePawnDouble;
 		Value [Piece.size] safeMobility, unsafeMobility;
 		Value [Piece.size] safeAttack, unsafeAttack;
 		Value [Piece.size] safeDefense, unsafeDefense;
 		Value [Piece.size] centerControl;
 		Value [Piece.size] kingAttack;
 		Value [Piece.size] kingDefense;
-		Value kingShield, kingStorm;
-		PawnStructure passedPawn, candidatePawn, isolatedPawn, doublePawn, backwardPawn, chainedPawn;
 		Value bishopPair;
 		Value materialImbalance;
+		Value safePawnAdvance, unsafePawnAdvance;
+		Value safePawnBlock, unsafePawnBlock;
+		Value safePawnDouble, unsafePawnDouble;
+		PawnStructure passedPawn, candidatePawn, isolatedPawn, doublePawn, backwardPawn, chainedPawn;
+		Value kingShield, kingStorm;
+		Value rookOnOpenFile, rookOnSemiOpenFile, rookSustainPawn, rookBlockPawn;
 		Value tempo;
 	}
 	struct Stack {
@@ -275,7 +276,7 @@ private:
 	void initAttack(const Board b) {
 		attackByPlayer[] = 0;
 	
-		pins = b.pins | b.setPins(opponent(b.player));
+		pins = b.pins | b.pins(opponent(b.player));
 
 		setCoverage!(Piece.pawn)(b, Color.white, pins);
 		setCoverage!(Piece.pawn)(b, Color.black, pins);
@@ -539,7 +540,67 @@ private:
 		return v;
 	}
 
+	/* rook structure */
+	Value rookStructure(const Board b, const Square x, const Color player) const {
+		const Color enemy = opponent(player);
+		const ulong pawns = b.piece[Piece.pawn];
+		const ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
+		Value v;
+
+		// open file ?
+		if ((pawns & b.mask[x].file) == 0) v += coeff.rookOnOpenFile;
+		else {
+			// semi open file ?
+			if ((pawn[player] & b.mask[x].file) == 0) v += coeff.rookOnSemiOpenFile;
+			// behind player's pawn ?
+			else if ((pawn[player] & b.mask[x].openFile[player]) != 0) v += coeff.rookSustainPawn;
+			// blocking opponent's pawn ?
+			if ((pawn[enemy] & b.mask[x].openFile[player]) != 0) v += coeff.rookBlockPawn;
+		}
+
+		return v;
+	}
+
+	/* rook structure */
+	Value rookStructure(const Board b, const Color player) const {
+		ulong rooks = b.piece[Piece.rook] & b.color[player];
+		Value v;
+
+		while (rooks) {
+			const Square x = popSquare(rooks);
+			v += rookStructure(b, x, player);
+		}
+
+		return v;
+	}
 	
+	/* rook structure */
+	void showRookStructure(const Board b, const Color player) const {
+		const Color enemy = opponent(player);
+		const ulong pawns = b.piece[Piece.pawn];
+		const ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
+		ulong rooks = b.piece[Piece.rook] & b.color[player];
+
+		void output(string msg, const Value v) {
+			write(msg, ": ", toCentipawns(v), ", ");
+		}
+
+		while (rooks) {
+			const Square x = popSquare(rooks);
+			write(x, ": ");
+			// open file ?
+			if ((pawns & b.mask[x].file) == 0) output("On open file: ", coeff.rookOnOpenFile);
+			else {
+				// semi open file ?
+				if ((pawn[player] & b.mask[x].file) == 0) output("On semi open file: ", coeff.rookOnSemiOpenFile);
+				// behind player's pawn ?
+				else if ((pawn[player] & b.mask[x].openFile[player]) != 0) output("Sustains own pawn: ", coeff.rookSustainPawn);
+				// blocking opponent's pawn ?
+				if ((pawn[enemy] & b.mask[x].openFile[player]) != 0) output("Blocks enemy pawn: ", coeff.rookBlockPawn);
+			}
+		}
+	}
+
 	/* drawish position */
 	Value bound(const Board b, const Value value) const {
 		const Stack *s = &stack[ply];
@@ -601,11 +662,12 @@ private:
 				case Piece.pawn:   v += influence!(Piece.pawn)(b, x, c) + pawnStructure(b, x, c); break;
 				case Piece.knight: v += influence!(Piece.knight)(b, x, c); break;
 				case Piece.bishop: v += influence!(Piece.bishop)(b, x, c); break;
-				case Piece.rook:   v += influence!(Piece.rook)(b, x, c); break;
+				case Piece.rook:   v += influence!(Piece.rook)(b, x, c) + rookStructure(b, x, c); break;
 				case Piece.queen:  v += influence!(Piece.queen)(b, x, c); break;
 				case Piece.king:   v += influence!(Piece.king)(b, x, c); break;
 				default: break;
 			}
+			
 		}
 		return v;
 	}
@@ -663,6 +725,11 @@ private:
 		writeln("backward pawn: ", mixin("coeff.backwardPawn.material." ~ phase) / 16,  ", ", mixin("coeff.backwardPawn.positional." ~ phase) / 16, "%");
 		writeln("chained pawn: ", mixin("coeff.chainedPawn.material." ~ phase) / 16, ", ", mixin("coeff.chainedPawn.positional." ~ phase) / 16, "%");
 		writeln("tempo: ", mixin("coeff.tempo." ~ phase) / 16);
+		write("Rook structure: ");
+		writefln("on open file: %+4d, ", mixin("coeff.rookOnOpenFile." ~ phase) / 16);
+		writefln("on semi open file: %+4d, ", mixin("coeff.rookOnSemiOpenFile." ~ phase) / 16);
+		writefln("sustains own pawn: %+4d, ", mixin("coeff.rookSustainPawn." ~ phase) / 16);
+		writefln("blocks enemy pawn: %+4d, ", mixin("coeff.rookBlockPawn." ~ phase) / 16);
 	}
 
 	void showBoard(string title, const Board board) {
@@ -763,6 +830,12 @@ public:
 		coeff.backwardPawn.positional.opening  = scale(w[i++], centipawn);
 		coeff.chainedPawn.positional.opening   = scale(w[i++], centipawn);
 
+		// rook structure
+		coeff.rookOnOpenFile.opening     = scale(w[i++]);
+		coeff.rookOnSemiOpenFile.opening = scale(w[i++]);
+		coeff.rookSustainPawn.opening    = scale(w[i++]);
+		coeff.rookBlockPawn.opening      = scale(w[i++]);
+
 		coeff.tempo.opening = scale(w[i++]);
 
 		// endgame
@@ -808,6 +881,12 @@ public:
 		coeff.doublePawn.positional.endgame    = scale(w[i++], centipawn);
 		coeff.backwardPawn.positional.endgame  = scale(w[i++], centipawn);
 		coeff.chainedPawn.positional.endgame   = scale(w[i++], centipawn);
+
+		// rook structure
+		coeff.rookOnOpenFile.endgame     = scale(w[i++]);
+		coeff.rookOnSemiOpenFile.endgame = scale(w[i++]);
+		coeff.rookSustainPawn.endgame    = scale(w[i++]);
+		coeff.rookBlockPawn.endgame      = scale(w[i++]);
 
 		coeff.tempo.endgame = scale(w[i++]);
 	}
@@ -891,6 +970,7 @@ public:
 		writefln("                %06x %06x", stack[ply].materialIndex[0], stack[ply].materialIndex[1]);
 
 		writeln("Pawn structure:"); foreach (c; Color.white .. Color.size)  showPawnStructure(board, c);
+		writeln("Rook structure:"); foreach (c; Color.white .. Color.size)  showRookStructure(board, c);
 		showBoard("Eval per square", board);
 	}
 
@@ -1025,6 +1105,8 @@ public:
 			value += influence!(Piece.king)(b, player)   - influence!(Piece.king)(b, enemy);
 			// pawnStructure
 			value += pawnStructure(b);
+			// rookStructure
+			value += rookStructure(b, player) - rookStructure(b, enemy);
 		}
 
 		// some value corrections for drawish positions
