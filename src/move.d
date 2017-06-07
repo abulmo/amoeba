@@ -162,11 +162,11 @@ struct History {
 	ushort [Square.size][CPiece.size] goodMoves, badMoves;
 	enum short max = 16384;
 	
-	void rescale() {
+	void rescale(const int d = 2) {
 		foreach (p; CPiece.wpawn .. CPiece.size)
 		foreach (x; Square.a1 .. Square.size) {
-			goodMoves[p][x] /= 2;
-			badMoves[p][x] /= 2;
+			goodMoves[p][x] /= d;
+			badMoves[p][x] /= d;
 		}
 	}
 
@@ -216,7 +216,7 @@ void insertionSort(MoveItem [] items) {
 		foreach (i; 1 .. n) {
 			size_t j;
 			const tmp = items[i];
-		    for (j = i ; j > 0 && tmp.value > items[j - 1].value; j--) {
+			for (j = i ; j > 0 && tmp.value > items[j - 1].value; j--) {
 				items[j] = items[j - 1];
 			}
 			items[j] = tmp;
@@ -248,7 +248,7 @@ private:
 	enum short badSeeMalus = -History.max - vCapture[Piece.king];
 	enum short ttBonus = 10000;
 	enum short killerBonus = 10;
-	enum to7thRankBonus = 12;
+	enum short to7thRankBonus = 12;
 	enum short doublon = short.min;
 
 	/* insert item j into i */
@@ -271,7 +271,7 @@ private:
 	void generateCapture(Board board) {
 		const size_t o = n;
 		board.generateMoves!(Generate.capture)(this);
-		foreach(ref i; item[o .. n]) {
+		foreach (ref i; item[o .. n]) {
 			auto m = i.move;
 			if (m == ttMove[0]) i.value = doublon;
 			else if (m == ttMove[1]) i.value = doublon;
