@@ -253,8 +253,8 @@ public:
 	void record(const int [2] result) {
 		int s;
 
-		foreach(r; result) {
-			switch(r) {
+		foreach (r; result) {
+			switch (r) {
 			case 0:
 				writeln(name[1], " wins");
 				++l;
