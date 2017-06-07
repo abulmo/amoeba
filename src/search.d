@@ -176,7 +176,7 @@ private:
 		Termination termination;
 		int depthInit;
 		int scoreInit;
-		size_t multiPv;
+		int multiPv;
 		bool easy;
 		bool isPondering;
 		bool verbose;
@@ -205,7 +205,7 @@ private:
 		int depth;
 		double time;
 		Line [Limits.moves.max] pv;
-		size_t multiPv;
+		int multiPv;
 
 		/* save current search infos (except pv / score) */
 		void update(const ulong n, const int d, const double t) {
@@ -236,7 +236,7 @@ private:
 		}
 
 		/* clear results */
-		void clear(const size_t n, const int scoreInit) {
+		void clear(const int n, const int scoreInit) {
 			nNodes = 0; depth = 0; time = 0.0;
 			multiPv = n;
 			foreach (i; 0 .. multiPv) {
@@ -465,8 +465,8 @@ private:
 		if (ply == Limits.ply.max) return eval(board, α, β);
 
 		// selective search: "frontier" node pruning & null move
-		bool hasThreats = (board.inCheck || α >= Score.big || β <= -Score.big);
-		if (doPrune && !isPv && !hasThreats) {
+		bool isSafe = !(isPv || board.inCheck || α >= Score.big || β <= -Score.big);
+		if (doPrune && isSafe) {
 			// pruning
 			const  δ = 200 * d - 100;
 			const sα = α - δ;
@@ -491,7 +491,7 @@ private:
 					tt.store(board.key, d, ply, Bound.lower, s, h.move[0]);
 					return s;
 				}
-				hasThreats = (s < Score.low);
+				isSafe = (s > Score.low);
 			}
 		}
 
@@ -511,19 +511,17 @@ private:
 
 		// generate moves in order & loop through them
 		while ((m = (i = moves.selectMove(board)).move) != 0) {
-			if (isPv) pv[ply + 1].clear();
+
 			const bool isTactical = (i.value > 0);
-			const bool isQuiet = !(isTactical || hasThreats || board.giveCheck(m));
-			iQuiet += isQuiet;
-
+			iQuiet += !isTactical;
 			// late move pruning
-			if (isQuiet && !isPv && iQuiet > 4 + d * d) continue;
-
+			if (isSafe && !isTactical && iQuiet > 4 + d * d && !board.giveCheck(m)) continue;
 			// see pruning
-			if (!hasThreats && !isPv && d < 2 && iQuiet > 4 && board.see(m) < 0) continue;
-
+			if (isSafe && d < 2 && iQuiet > 4 && board.see(m) < 0) continue;
 			// check extension (if move is not losing)
-			e = (board.inCheck && board.see(m) >= 0);
+			e = (board.giveCheck(m) && board.see(m) >= 0);
+
+			if (isPv) pv[ply + 1].clear();
 
 			update(m);
 				// principal variation search (pvs)
@@ -531,7 +529,7 @@ private:
 					s = -αβ(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
-					if (!isQuiet) r = 0;
+					if (isTactical) r = 0;
 					else if (iQuiet <= 4) r = 1;
 					else r = 1 + d / 4;
 					// null window search (nws)
@@ -575,21 +573,20 @@ private:
 		pv[0].clear();
 
 		// loop thru all moves (and order them)
-		const bool hasThreats = (board.inCheck || α >= Score.big || β <= -Score.big);
 		for (int i = iPv; i < rootMoves.length; ++i) {
 			Move m = rootMoves[i];
 			const bool isTactical = rootMoves.item[i].value > 0;
 			pv[1].clear();
 			// check extension (if move is not losing)
-			e = (board.inCheck && board.see(m) >= 0);
+			e = (board.giveCheck(m) && board.see(m) >= 0);
 			update(m);
 				// principal variation search (pvs)
 				if (rootMoves.isFirst(m)) {
 					s = -αβ(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
-					if (hasThreats || isTactical || board.inCheck) r = 0;
-					else if (iQuiet++ <= 3) r = 1;
+					if (isTactical) r = 0;
+					else if (++iQuiet <= 4) r = 1;
 					else r = 1 + d / 4;
 					// null window search (nws)
 					s = - αβ(-α - 1, -α, d + e - r - 1);
@@ -646,7 +643,7 @@ private:
 	}
 
 	/* multiPv : search n best moves */
-	void multiPv(const size_t n, const int d) {
+	void multiPv(const int n, const int d) {
 		int β = Score.mate - 1;
 
 		// search the ith best move
@@ -660,9 +657,9 @@ private:
 		foreach (i; 0 .. n) rootMoves.setBest(info.pv[i].move[0], i);
 
 		if (option.verbose) {
-			if (message) message.send(info.toUCI(iPv - 1));
-			else writeln(info.toUCI(iPv - 1));
-		} else if (message) message.log!'>'(info.toUCI(iPv - 1));
+			if (message) message.send(info.toUCI(n));
+			else writeln(info.toUCI(n));
+		} else if (message) message.log!'>'(info.toUCI(n));
 	}
 
 	/* clear search setting before searching */
@@ -674,7 +671,7 @@ private:
 		nNodes = 0;
 		stop = false;
 		info.clear(option.multiPv, option.scoreInit);
-		heuristicsClear();
+		history.rescale(8);
 		iPv = 0;
 	}
 
