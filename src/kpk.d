@@ -56,6 +56,7 @@ void init () {
 			if (0 <= r && r < 8 && 0 <= f && f < 8) attacks[x].king |= bit(8 * r + f);
 		}
 	}
+
 	// initial setup: score obvious positions
 	foreach (int i; 0 .. size) {
 		getSquares(i, p, wk, bk, player);
