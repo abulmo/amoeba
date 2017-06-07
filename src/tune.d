@@ -165,10 +165,9 @@ void getPartialError(const int id, shared GameBase games, const double [] weight
 	Search search = new Search(256);
 	search.eval.setWeight(weights);
 
-	while ((game = games.next()) !is null) {
+	while ((game = games.next()) !is null) if ((end = game.moves.length) > 20) {
 		search.clear();
 
-		end = game.moves.length;
 		board.set();
 		foreach (m; game.moves) board.update(m);
 		if (game.result == Result.draw) end -= board.fifty;
@@ -329,31 +328,33 @@ class Amoeba {
 		f.write("\t"); foreach (i; 28 ..  35) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe attack   [28-34]");
 		f.write("\t"); foreach (i; 35 ..  42) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe defense    [35-41]");
 		f.write("\t"); foreach (i; 42 ..  49) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe defense  [42-48]");
-		f.write("\t"); foreach (i; 49 ..  55) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [59-54]");
+		f.write("\t"); foreach (i; 49 ..  55) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [49-54]");
 		f.write("\t"); foreach (i; 55 ..  60) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [55-59]");
 		f.write("\t"); foreach (i; 60 ..  65) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [60-64]");
 		f.write("\t"); foreach (i; 65 ..  67) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [65-66]");
 		f.write("\t"); foreach (i; 67 ..  74) f.writef("%+7.4f, ", weight[i]); f.writeln(" // positional      [67-80]");
 		f.write("\t"); foreach (i; 74 ..  81) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i; 81 ..  87) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure [81-92]");
+		f.write("\t"); foreach (i; 81 ..  87) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure     [81-92]");
 		f.write("\t"); foreach (i; 87 ..  93) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i; 93 ..  94) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [93]");
+		f.write("\t"); foreach (i; 93 ..  97) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // R structure     [93-96]");
+		f.write("\t"); foreach (i; 97 ..  98) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [97]");
 		f.writeln("\t// Endgame");
-		f.write("\t"); foreach (i; 94 .. 101) f.writef("%+7.4f, ", weight[i]); f.writeln("// material        [94-100]");
-		f.write("\t"); foreach (i;101 .. 108) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe mobility   [101-107]");
-		f.write("\t"); foreach (i;108 .. 115) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe mobility [108-114]");
-		f.write("\t"); foreach (i;115 .. 122) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe attack     [115-121]");
-		f.write("\t"); foreach (i;122 .. 129) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe attack   [122-128]");
-		f.write("\t"); foreach (i;129 .. 136) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe defense    [129-135]");
-		f.write("\t"); foreach (i;136 .. 143) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe defense  [136-142]");
-		f.write("\t"); foreach (i;143 .. 149) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [143-148]");
-		f.write("\t"); foreach (i;149 .. 154) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [149-153]");
-		f.write("\t"); foreach (i;154 .. 159) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [154-158]");
-		f.write("\t"); foreach (i;159 .. 161) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [159-160]");
-		f.write("\t"); foreach (i;161 .. 166) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // positional      [161-165]");
-		f.write("\t"); foreach (i;166 .. 172) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure     [166-177]");
-		f.write("\t"); foreach (i;172 .. 178) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i;178 .. 179) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [178]");
+		f.write("\t"); foreach (i; 98 .. 105) f.writef("%+7.4f, ", weight[i]); f.writeln("// material        [98-104]");
+		f.write("\t"); foreach (i;105 .. 112) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe mobility   [105-111]");
+		f.write("\t"); foreach (i;112 .. 119) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe mobility [116-118]");
+		f.write("\t"); foreach (i;119 .. 126) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe attack     [119-125]");
+		f.write("\t"); foreach (i;126 .. 133) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe attack   [126-132]");
+		f.write("\t"); foreach (i;133 .. 140) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe defense    [133-139]");
+		f.write("\t"); foreach (i;140 .. 147) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe defense  [140-146]");
+		f.write("\t"); foreach (i;147 .. 153) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [147-152]");
+		f.write("\t"); foreach (i;153 .. 158) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [153-157]");
+		f.write("\t"); foreach (i;158 .. 163) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [158-162]");
+		f.write("\t"); foreach (i;163 .. 165) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [163-164]");
+		f.write("\t"); foreach (i;165 .. 170) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // positional      [165-169]");
+		f.write("\t"); foreach (i;170 .. 176) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure     [170-181]");
+		f.write("\t"); foreach (i;176 .. 182) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;182 .. 186) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // R structure     [182-185]");
+		f.write("\t"); foreach (i;186 .. 187) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [186]");
 		f.writeln("];");
 		f.flush();
 	}
@@ -578,6 +579,7 @@ void tuneByPiece(Amoeba amoeba, const double volume, const double tolerance, con
 			king, pawn, knight, bishop, rook, queen, king,
 			pawn, pawn, pawn, pawn, pawn, pawn, // pawn structure
 			pawn, pawn, pawn, pawn, pawn, pawn,
+			rook, rook, rook, rook,             // rook structure
 			none,
 			// Endgame
 			pawn, knight, bishop, rook, queen, bishop, none, // material
@@ -594,6 +596,7 @@ void tuneByPiece(Amoeba amoeba, const double volume, const double tolerance, con
 			pawn, knight, bishop, queen, king, // positional
 			pawn, pawn, pawn, pawn, pawn, pawn, // pawn structure
 			pawn, pawn, pawn, pawn, pawn, pawn,
+			rook, rook, rook, rook,             // rook structure
 			none,
 		];
 
@@ -660,7 +663,7 @@ void main(string [] args) {
 	// determine weights from scratch
 	else if (fromScratch) {
 		amoeba.weights[] = 0;
-		amoeba.weights[0..5] = amoeba.weights[94..99] = [1, 3, 3, 5, 9];
+		amoeba.weights[0..5] = amoeba.weights[98..103] = [1, 3, 3, 5, 9];
 	}
 
 	// tune weight sets as material, positional, mobility, pawn structures & tempo concepts.
@@ -668,30 +671,33 @@ void main(string [] args) {
 		if (optimizeK) amoeba.optimizeK(0.0000001, 100);
 		// material
 		writeln("Tuning material");
-	 	tune(amoeba, [1, 7], [94, 101], size, tolerance, maxIter, adaptative);
+	 	tune(amoeba, [1, 7], [98, 105], size, tolerance, maxIter, adaptative);
 		// positional
 		writeln("Tuning positional");
-	 	tune(amoeba, [67, 81], [161, 166], size, tolerance, maxIter, adaptative);
+	 	tune(amoeba, [67, 81], [165, 171], size, tolerance, maxIter, adaptative);
 		// mobility
 		writeln("Tuning mobility");
-		tune(amoeba, [7, 21], [101, 115], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [7, 21], [105, 119], size, tolerance, maxIter, adaptative);
 		writeln("Tuning attack");
-		tune(amoeba, [21, 35], [115, 129], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [21, 35], [119, 133], size, tolerance, maxIter, adaptative);
 		writeln("Tuning defense");
-		tune(amoeba, [35, 49], [129, 143], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [35, 49], [133, 147], size, tolerance, maxIter, adaptative);
 		writeln("Center control");
-		tune(amoeba, [49, 55], [143, 149], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [49, 55], [147, 153], size, tolerance, maxIter, adaptative);
 		// king
 		writeln("Tuning King attack");
-		tune(amoeba, [55, 60], [149, 154], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [55, 60], [153, 158], size, tolerance, maxIter, adaptative);
 		writeln("Tuning King defense"); // +king shield/storm
-		tune(amoeba, [60, 66], [154, 166], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [60, 66], [158, 170], size, tolerance, maxIter, adaptative);
 		// pawn structure
 		writeln("Tuning pawn structure");
-		tune(amoeba, [81, 92], [166, 178], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [81, 92], [170, 182], size, tolerance, maxIter, adaptative);
+		// rook structure
+		writeln("Tuning rook structure");
+		tune(amoeba, [93, 97], [182, 186], size, tolerance, maxIter, adaptative);
 		// tempo
 		writeln("Tuning tempo");
-	 	tune(amoeba, [93, 94], [178, 179], size, tolerance, maxIter, adaptative);
+	 	tune(amoeba, [97, 98], [186, 187], size, tolerance, maxIter, adaptative);
 
 	// tune weight sets by piece involved.
 	} else if (byPiece) {
