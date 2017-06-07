@@ -16,7 +16,7 @@ ifeq ($(POPCOUNT),)
 endif
 
 ifeq ($(CPU),)
-	CPU=haswell
+	CPU=sandybridge
 endif
 
 ifeq ($(BUILD),)
@@ -34,7 +34,7 @@ ifeq ($(DC),gdc)
 		DFLAGS += -O3 -funittest -fno-bounds-check 
 	endif
 	ifeq ($(POPCOUNT),true)
-		DFLAGS +=  -fversion=withPopCount -msse4.2 
+		DFLAGS += -fversion=withPopCount -msse4.2 
 	endif
 	PGO_GEN = -fprofile-generate -lgcov
 	PGO_USE = -fprofile-use
@@ -45,16 +45,16 @@ endif
 ifeq ($(DC),ldc2)
 	DFLAGS =  -singleobj -w -dw -mcpu=$(CPU)
 	ifeq ($(BUILD),fast)
-		DFLAGS += -O3 -release -boundscheck=off
+		DFLAGS += -O3 -release -boundscheck=off -enable-cross-module-inlining
 	else ifeq ($(BUILD),old)
 		DFLAGS += -O3 -release
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -O0 -g -gc
 	else ifeq ($(BUILD),unittest)
-		DFLAGS += -O3 -unittest -boundscheck=off
+		DFLAGS += -O3 -unittest -boundscheck=off -enable-cross-module-inlining
 	endif
 	ifeq ($(POPCOUNT),true)
-		DFLAGS +=  -d-version=withPopCount -mattr=+sse4.2,popcnt,avx
+		DFLAGS += -d-version=withPopCount -mattr=popcnt
 	endif
 	PGO_GEN = -fprofile-instr-generate
 	PGO_USE = -fprofile-instr-use=amoeba.profdata
@@ -72,7 +72,7 @@ ifeq ($(DC),dmd)
 		DFLAGS = -unittest -boundscheck=off -cov
 	endif
 	ifeq ($(POPCOUNT),true)
-		DFLAGS +=  -version=withPopCount
+		DFLAGS += -version=withPopCount
 	endif
 	PGO_GEN = 
 	PGO_USE = 
