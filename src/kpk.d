@@ -110,7 +110,7 @@ void init () {
 }
 
 /* evaluate a kpk position, rescale the score according to win/draw/loss */
-Value rescale(const Board b, const Value score) {
+int rescale(const Board b, const int value) {
 	const ulong P = b.piece[Piece.pawn];
 	const ulong V = b.piece[Piece.none];
 
@@ -133,11 +133,11 @@ Value rescale(const Board b, const Value score) {
 
 		int i = getIndex(p, wk, bk, player);
 
-		if (result[i] == win) return score * 4;
-		else return score / 16;
+		if (result[i] == win) return value * 4;
+		else return value / 16;
 	}
 
-	return score;
+	return value;
 }
 
 /* check correctness of algorithm */
