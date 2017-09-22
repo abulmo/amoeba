@@ -602,10 +602,9 @@ private:
 	}
 
 	/* drawish position */
-	Value bound(const Board b, const Value value) const {
+	int bound(const Board b, const int value) const {
 		const Stack *s = &stack[ply];
-		const int v = sign(value);
-		const Value draw = {v, v};
+		const int draw = sign(value);
 
 		// some pawn free drawish position
 		if (s.stage <= 23) {
@@ -617,8 +616,8 @@ private:
 		// some minor vs pawn not winning position
 		if (s.stage <= 6) {
 			foreach (i; 0 .. 3) {
-				if ((boundTable[i] == s.materialIndex[b.player] && v > 0) 
-				 || (boundTable[i]== s.materialIndex[opponent(b.player)] && v < 0)) return draw;
+				if ((boundTable[i] == s.materialIndex[b.player] && value > 0) 
+				 || (boundTable[i]== s.materialIndex[opponent(b.player)] && value < 0)) return draw;
 			}
 		}
 		// king vs king + pawn
@@ -641,12 +640,9 @@ private:
 		return v / centipawn;
 	}
 
-	/* convert value to centipawns */
-	int sign(const Value value) const {
-		const Stack *s = &stack[ply];
-		int v = value.opening * s.stage + value.endgame * (64 - s.stage);
-		if (v < 0) v = -1; else if (v > 0) v = +1;
-		return v;
+	/* get sign of a value */
+	int sign(const int value) const {
+		return value < 0 ? -1 : (value > 0 ? +1 : 0);
 	}
 
 	/* eval a single square */
@@ -1077,7 +1073,7 @@ public:
 	int opCall(const Board b, const Move m) const {
 		const Color player = b.player;
 		const Color enemy = opponent(player);
-		Value value = coeff.tempo * 2;
+		Value value = coeff.tempo * -2 - pieceValue(toPiece(b[m.from]), player, m.from);
 
 		if (m.promotion) value += pieceValue(m.promotion, player, m.to);
 		else value += pieceValue(toPiece(b[m.from]), player, m.to);
@@ -1109,10 +1105,8 @@ public:
 			value += rookStructure(b, player) - rookStructure(b, enemy);
 		}
 
-		// some value corrections for drawish positions
-		value = bound(b, value);
-
-		return toCentipawns(value);
+		// return score in centipawns with some corrections for drawish positions
+		return bound(b, toCentipawns(value));
 	}
 }
 
