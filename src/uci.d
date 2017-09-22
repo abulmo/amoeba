@@ -57,7 +57,6 @@ class Uci {
 	Moves moves;
 	shared util.Message message;	
 	Time [Color.size] time;
-	Option option;
 	int depthMax, movesToGo, multipv;
 	ulong nodesMax;
 	bool canPonder, isPondering, easy;
