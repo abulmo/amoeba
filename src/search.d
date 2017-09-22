@@ -16,10 +16,11 @@ enum Bound {upper, lower, exact}
  * Entry Table Entry
  */
 struct Entry {
-	ulong code;
+	uint code;
 	ushort info;
 	Move[2] move;
-	short value;
+	short value; // from search
+	short eval;  // static eval
 
 	/* depth */
 	int depth() const @property {
@@ -41,26 +42,23 @@ struct Entry {
 		info = cast (ushort) ((info & 511) | (date << 9));
 	}
 
-	void store(const Bound b, const int d, const int date, const int v, const int ply) {
+	/* store common data to update & set into this entry */
+	void store(const Bound b, const int d, const int date, const int v, const int e) {
 		info = cast (ushort) (b | (d << 2) | (date << 9));
-		value = cast (short) (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
-	}
-
-	/* score (with Mate score rescaled) */
-	int score(const int ply) const {
-		return value < Score.low ? value + ply : (value > Score.high ? value - ply : value);
+		value = cast (short) v;
+		eval = cast (short) e;
 	}
 
 	/* update an existing entry */
-	void update(const int d, const int ply, const int date, const Bound b, const int v, const Move m) {
-		if (d >= depth) store(b, d, date, v, ply);
-		if (m != move[0]) { move[1] = move[0]; move[0] = m;	}
+	void update(const int d, const int date, const Bound b, const int v, const int e, const Move m) {
+		store(b, d, date, v, e);
+		if (m != move[0]) { move[1] = move[0]; move[0] = m; }
 	}
 
 	/* set a new entry */
-	void set(const Key k, const int d, const int ply, const int date, const Bound b, const int v, const Move m) {
+	void set(const Key k, const int d, const int date, const Bound b, const int v, const int e, const Move m) {
 		code = k.code;
-		store(b, d, date, v, ply);
+		store(b, d, date, v, e);
 		move = [m, 0];
 	}
 
@@ -109,7 +107,7 @@ final class TranspositionTable {
 
 	/* look for an entry matching the zobrist key */
 	bool probe(const Key k, ref Entry found) {
-		const size_t i = cast (size_t) (k.code & mask);
+		const size_t i = k.index(mask);
 		foreach (ref h; entry[i .. i + bucketSize]) {
 			if (h.code == k.code) {
 				h.refresh(date);
@@ -121,21 +119,21 @@ final class TranspositionTable {
 	}
 
 	/* store search data */
-	void store(const Key k, const int depth, const int ply, const Bound b, const int v, const Move m) {
-		const size_t i = cast (size_t) (k.code & mask);
+	void store(const Key k, const int depth, const Bound b, const int v, const int e, const Move m) {
+		const size_t i = k.index(mask);
 		Entry *w = &entry[i];
 		foreach (ref h; entry[i .. i + bucketSize]) {
 			if (h.code == k.code) {
-				h.update(depth, ply, date, b, v, m);
-				break;
+				h.update(depth, date, b, v, e, m);
+				return;
 			} else if (w.info > h.info) w = &h;
 		}
-		w.set(k, depth, ply, date, b, v, m);
+		w.set(k, depth, date, b, v, e, m);
 	}
 
 	/* speed up further access */
 	void prefetch(const Key k) {
-		const size_t i = cast (size_t) (k.code & mask);
+		const size_t i = k.index(mask);
 		util.prefetch(&entry[i]);
 	}
 
@@ -174,6 +172,7 @@ private:
 	/* search option */
 	struct Option {
 		Termination termination;
+		double lmrDepth = 1.0, lmrMove = 0.5;
 		int depthInit;
 		int scoreInit;
 		int multiPv;
@@ -273,6 +272,7 @@ private:
 	Board board;
 	TranspositionTable tt;
 	History history;
+	ubyte[32][32] reduction;
 	Info info;
 	Moves rootMoves;
 	Line line;
@@ -283,7 +283,7 @@ private:
 	int ply, iPv;
 	Chrono timer;
 	bool stop;
-
+	
 public:
 	Eval eval;
 	shared Message message;
@@ -360,6 +360,21 @@ private:
 		if (m) eval.restore();
 	}
 
+	/* convert a score for storage a score */
+	int toHash(const int v) const {
+		return (v < Score.low ? v - ply : (v > Score.high ? v + ply : v));
+	}
+
+	/* convert a stored score to a searched score */
+	int fromHash(const int v) const {
+		return (v < Score.low ? v + ply : (v > Score.high ? v - ply : v));
+	}
+
+	/* get a reduction value */
+	int reduce(const int d, const int m) const {
+		return reduction[min(d, 31)][min(m, 31)];
+	}
+
 	/* quiescence search */
 	int qs(int α, int β) {
 		enum δ = 200;
@@ -377,28 +392,25 @@ private:
 
 		// distance to mate pruning
 		bs = ply - Score.mate;
-		if (bs > α && (α = bs) >= β) return bs;
+		/+ if (bs > α && (α = bs) >= β) return bs; // never happens +/
 		s = Score.mate - ply - 1;
 		if (s < β && (β = s) <= α) return s;
 
 		// transposition table probe
 		if (tt.probe(board.key, h)) {
-			s = h.score(ply);
-			if (h.bound == Bound.exact) return s;
-			else if (h.bound == Bound.lower && (α = s) >= β) return s;
+			s = fromHash(h.value);
+			if (h.bound == Bound.lower && (α = s) >= β) return s;
 			else if (h.bound == Bound.upper && (β = s) <= α) return s;
-		}
+			else if (h.bound == Bound.exact) return s;
+			v = fromHash(h.eval);
+			if ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v)) v = s;
+		} else v = eval(board, α, β);
 
 		// standpat
 		const αOld = α;
-		if (!board.inCheck) {
-			v = eval(board, α, β);
-			if (h.info > 0 && ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v))) v = s;
-			if (v > bs && (bs = v) > α) {
-				tt.store(board.key, 0, ply, tt.bound(bs, β), bs, h.move[0]);
-				if ((α = bs) >= β) return bs;
-			}
-			v += δ;
+		if (!board.inCheck && v > bs && (bs = v) > α) {
+			tt.store(board.key, 0, tt.bound(bs, β), toHash(bs), toHash(v), h.move[0]);
+			if ((α = bs) >= β) return bs;
 		}
 
 		//max depth reached
@@ -408,7 +420,7 @@ private:
 		moves.setup(board.inCheck, h.move);
 
 		while ((m = moves.selectMove(board).move) != 0) {
-			s = eval(board, m) + v;
+			s = eval(board, m) + v + δ;
 			if (s > α || isPv || board.inCheck || board.giveCheck(m)) {
 				update(m);
 					s = -qs(-β, -α);
@@ -416,12 +428,12 @@ private:
 			}
 			if (stop) break;
 			if (s > bs && (bs = s) > α) {
-				tt.store(board.key, board.inCheck, ply, tt.bound(bs, β), bs, m);
+				tt.store(board.key, board.inCheck, tt.bound(bs, β), toHash(bs), toHash(v), m);
 				if ((α = bs) >= β) break;
 			}
 		}
 
-		if (!stop && bs <= αOld) tt.store(board.key, board.inCheck, ply, Bound.upper, bs, h.move[0]);
+		if (!stop && bs <= αOld) tt.store(board.key, board.inCheck, Bound.upper, toHash(bs), toHash(v), h.move[0]);
 
 		return bs;
 	}
@@ -431,8 +443,8 @@ private:
 		const bool isPv = (α + 1 < β);
 		int v, s, bs, e, r, iQuiet;
 		Moves moves = void;
+		MoveItem i = void;
 		Move m;
-		MoveItem i;
 		Entry h;
 
 		// qs search
@@ -446,20 +458,22 @@ private:
 
 		// distance to mate
 		bs = ply - Score.mate;
-		if (bs > α && (α = bs) >= β) return bs;
+		/+ if (bs > α && (α = bs) >= β) return bs; // never happens +/
 		s = Score.mate - ply - 1;
 		if (s < β && (β = s) <= α) return s;
 
 		// transposition table probe
 		if (tt.probe(board.key, h) && !isPv) {
-			s = h.score(ply);
+			s = fromHash(h.value);
 			if (h.depth >= d || s <= ply - Score.mate || s >= Score.mate - ply - 1) {
-				if (h.bound == Bound.exact) return s;
-				else if (h.bound == Bound.lower && s >= β) return s;
+				if (h.bound == Bound.lower && s >= β) return s;
 				else if (h.bound == Bound.upper && s <= α) return s;
+				else if (h.bound == Bound.exact) return s;
 				if (h.bound != Bound.upper && s > bs) bs = s;
 			}
-		}
+			v = fromHash(h.eval);
+			if ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v)) v = s;
+		} else v = eval(board);
 
 		//max depth reached
 		if (ply == Limits.ply.max) return eval(board, α, β);
@@ -472,24 +486,23 @@ private:
 			const sα = α - δ;
 			const sβ = β + δ;
 
-			v = eval(board);
-			if (h.info > 0 && ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v))) v = s;
-			
 			// eval pruning (our position is very good, no need to search further)
 			if (v >= sβ) return β;
 			// razoring (our position is so bad, no need to search further)
 			else if (v <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
 
 			// null move
-			if (d >= 2 && line.top && (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king]))) {
-				r = 3 + d / 4;
+			if (d >= 2 && v >= β && (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king]))) {
+				r = 3 + d / 4 + min((v - β) / 128, 3);
 				update(0);
 					s = -αβ(-β, -β + 1, d - r);
 				restore(0);
 				if (!stop && s >= β) {
 					if (s >= Score.high) s = β;
-					tt.store(board.key, d, ply, Bound.lower, s, h.move[0]);
-					return s;
+					if (d < 12 ||  αβ(β - 1, β, d - r, false) >= β) {
+						tt.store(board.key, d, Bound.lower, toHash(s), toHash(v), h.move[0]);
+						return s;
+					}
 				}
 				isSafe = (s > Score.low);
 			}
@@ -499,8 +512,9 @@ private:
 		if (!h.move[0]) {
 			r = isPv ? 2 : max(4, 2 + d / 4);
 			if (d > r) {
-				αβ(α, β, d - r, false);
+				s = αβ(α, β, d - r, false);
 				tt.probe(board.key, h);
+				isSafe &= (-Score.big < s && s < Score.big);
 			}
 		}
 
@@ -512,12 +526,12 @@ private:
 		// generate moves in order & loop through them
 		while ((m = (i = moves.selectMove(board)).move) != 0) {
 
-			const bool isTactical = (i.value > 0);
+			const bool isTactical = (i.value > 0) || (isPv && (board.isTactical(m) || board.giveCheck(m)));
 			iQuiet += !isTactical;
 			// late move pruning
 			if (isSafe && !isTactical && iQuiet > 4 + d * d && !board.giveCheck(m)) continue;
 			// see pruning
-			if (isSafe && d < 2 && iQuiet > 4 && board.see(m) < 0) continue;
+			if (isSafe && d < 4 && iQuiet > 4 && board.see(m) < 0) continue;
 			// check extension (if move is not losing)
 			e = (board.giveCheck(m) && board.see(m) >= 0);
 
@@ -529,9 +543,7 @@ private:
 					s = -αβ(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
-					if (isTactical) r = 0;
-					else if (iQuiet <= 4) r = 1;
-					else r = 1 + d / 4;
+					r = isTactical ? 0 : reduce(d, iQuiet);
 					// null window search (nws)
 					s = -αβ(-α - 1, -α, d + e - r - 1);
 					// new pv found or new bestscore (bs) at reduced depth ?
@@ -544,7 +556,7 @@ private:
 
 			// best move ?
 			if (s > bs && (bs = s) > α) {
-				tt.store(board.key, d, ply, tt.bound(bs, β), bs, m);
+				tt.store(board.key, d, tt.bound(bs, β), toHash(bs), toHash(v), m);
 				if (isPv) pv[ply].set(m, pv[ply + 1]);
 				if ((α = bs) >= β) {
 					if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
@@ -560,7 +572,7 @@ private:
 			else return 0;
 		}
 
-		if (!stop && bs <= αOld) tt.store(board.key, d, ply, Bound.upper, bs, moves[0]);
+		if (!stop && bs <= αOld) tt.store(board.key, d, Bound.upper, toHash(bs), toHash(v), moves[0]);
 
 		return bs;
 	}
@@ -569,25 +581,25 @@ private:
 	void αβRoot(int α, const int β, const int d) {
 		const αOld = α;
 		int s, bs = -Score.mate, e, r, iQuiet;
+		const int v = eval(board, α, β);
 
 		pv[0].clear();
 
 		// loop thru all moves (and order them)
 		for (int i = iPv; i < rootMoves.length; ++i) {
 			Move m = rootMoves[i];
-			const bool isTactical = rootMoves.item[i].value > 0;
-			pv[1].clear();
+			const bool isTactical = rootMoves.item[i].value > 0 || board.isTactical(m) || board.giveCheck(m);
 			// check extension (if move is not losing)
 			e = (board.giveCheck(m) && board.see(m) >= 0);
+
+			pv[1].clear();
 			update(m);
 				// principal variation search (pvs)
 				if (rootMoves.isFirst(m)) {
 					s = -αβ(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
-					if (isTactical) r = 0;
-					else if (++iQuiet <= 4) r = 1;
-					else r = 1 + d / 4;
+					r = isTactical ? 0 : reduce(d, iQuiet);
 					// null window search (nws)
 					s = - αβ(-α - 1, -α, d + e - r - 1);
 					// new pv ?
@@ -602,7 +614,7 @@ private:
 				pv[0].set(m, pv[1]);
 				info.update(nNodes, d, time);
 				info.store(iPv, bs, pv[0]);
-				if (iPv == 0) tt.store(board.key, d, 0, tt.bound(bs, β), bs, m);
+				if (iPv == 0) tt.store(board.key, d, tt.bound(bs, β), toHash(bs), toHash(v), m);
 				if ((α = bs) >= β) {
 					if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
 					break;
@@ -614,7 +626,7 @@ private:
 			if (!board.isTactical(m) && !board.inCheck) history.updateBad(board, m, d * d);
 		}
 
-		if (!stop && iPv == 0 && bs <= αOld) tt.store(board.key, d, ply, Bound.upper, bs, rootMoves[0]);
+		if (!stop && iPv == 0 && bs <= αOld) tt.store(board.key, d, Bound.upper, toHash(bs), toHash(v), rootMoves[0]);
 
 		// store results
 		info.update(nNodes, d, time);
@@ -622,24 +634,25 @@ private:
 
 	/* aspiration window */
 	void aspiration(const int α, const int β, const int d) {
-		int λ, υ, up = +10, down = -10;
+		int λ, υ, δ = +10;
 
 		if (d <= 4) {
 			αβRoot(α, β, d);
-		} else do {
-				λ = max(α, info.score[iPv] + down);
-				υ = min(β, info.score[iPv] + up);
+		} else {
+			λ = info.score[iPv] - δ; υ = info.score[iPv] + δ;
+			for (; !stop; δ *= 2) {
+				λ = max(α, λ); υ = min(β, υ);
 				αβRoot(λ, υ, d);
-				if (info.score[iPv] <= λ && down < -1) {
+				if (info.score[iPv] <= λ && λ > α) {
 					if (!checkTime(0.381966 * option.termination.time.max)) option.termination.time.max = option.termination.time.extra;
-					down *= 2 ; up = 1;
-				} else if (info.score[iPv] >= υ && up > 1) {
-					down = -1; up *= 2;
+					υ = (λ + υ) / 2; λ = info.score[iPv] - δ;
+				} else if (info.score[iPv] >= υ && υ < β) {
+					λ = (λ + υ) / 2; υ = info.score[iPv] + δ;
 				} else {
-					down = α - info.score[iPv];
-					up = β - info.score[iPv];
+					break;
 				}
-		} while (!stop && ((info.score[iPv] <= λ && λ > α) || (info.score[iPv] >= υ && υ < β)));
+			}
+		}
 	}
 
 	/* multiPv : search n best moves */
@@ -696,6 +709,7 @@ public:
 		message = null;
 		option.verbose = true;
 		clear();
+		setReduction(1.1, 0.7);
 	}
 
 	/* clear search caches */
@@ -711,6 +725,15 @@ public:
 		eval.resize(size / 32);
 	}
 
+	/* init late move reduction table */
+	void setReduction(const double lmrDepth, const double lmrMove) {
+		foreach (d; 0 .. 32)
+		foreach (m; 0 .. 32) {
+			reduction[d][m] = cast (ubyte) ((d ? lmrDepth * std.math.log(d) : 0) + (m ? lmrMove * std.math.log(m) : 0));
+		}
+	}
+
+
 	/* set board */
 	void set(bool copy = true)(Board b) {
 		Entry h;
@@ -721,7 +744,7 @@ public:
 		while ((m = rootMoves.selectMove(board).move) != 0) {}
 		if (h.bound == Bound.exact && h.move[0] == rootMoves[0]) {
 			option.depthInit = max(1, h.depth);
-			option.scoreInit = h.score(0);
+			option.scoreInit = fromHash(h.value);
 		} else {
 			option.depthInit = 1;
 			option.scoreInit = 0;
