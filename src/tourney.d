@@ -68,7 +68,7 @@ public:
 	}
 
 	/* start an engine */
-	void start(bool showDebug) {
+	void start(bool showDebug, int hashSize = 64) {
 		string l;
 
 		pipe = pipeProcess(cmd);
@@ -77,6 +77,7 @@ public:
 			l = receive();
 			if (l.skipOver("id name")) name = l.strip();
 			if (showDebug && l.skipOver("option name Log type check")) send("setoption name Log value true");
+			if (hashSize != 64 && l.skipOver("option name Hash type spin")) send("setoption name Hash value ", hashSize);
 		} while (l != "uciok");
 	}
 
@@ -398,9 +399,9 @@ public:
 	}
 
 	/* start a pool of UCI engines */
-	void start(const bool showDebug) {
-		foreach (ref e; player) e.start(showDebug);
-		foreach (ref e; opponent) e.start(showDebug);
+	void start(const bool showDebug, const int hashSize) {
+		foreach (ref e; player) e.start(showDebug, hashSize);
+		foreach (ref e; opponent) e.start(showDebug, hashSize);
 
 		sprt.setEngineNames([player[0].name, opponent[0].name]);
 	}
@@ -490,7 +491,7 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
-	int nGames = 30000, nCpu = 1, nRandom, nSimulation = 0;
+	int nGames = 30000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64;
 	bool showVersion, showHelp, showDebug;
 	string [] engineName, openingFile;
 	string outputFile, var;
@@ -498,19 +499,20 @@ void main(string [] args) {
 	Var v;
 
 	// read arguments
-	getopt(args, "engine|e", &engineName, "time|t", &time,
+	getopt(args, "engine|e", &engineName, "time|t", &time, "hash", &hashSize,
 		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
 		"simulation", &nSimulation, "draw", &draw, "white", &white,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
 		"debug|d", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.3\n© 2017 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.4\n© 2017 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
 		writeln("\ntourney --engine|-e <cmd> --engine|-e <cmd>  [optional settings]") ;
 		writeln("    --engine|-e <cmd>        launch an engine with <cmd>. 2 engines should be loaded");
 		writeln("    --time|-t <movetime>     time (in seconds) to play a move (default 0.1s)");
+		writeln("    --hash <MB>              hash size in MB (default 64)");
 		writeln("    --book|-b <pgn|epd file> opening book");
 		writeln("    --random|-r depth>       random opening moves up to <depth>");
 		writeln("    --output|-o <pgn file>   save the played games");
@@ -565,7 +567,7 @@ void main(string [] args) {
 		else engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
 
 		// run the tournament
-		engines.start(showDebug);
+		engines.start(showDebug, hashSize);
 		engines.loop(nGames, time, v);
 		engines.end();
 	}
