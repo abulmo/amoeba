@@ -10,20 +10,30 @@ import board, eval, move, search, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
 
 /* version */
-enum string versionNumber = "2.5";
+enum string versionNumber = "2.6";
 
 /* Some information about the compilation */
 string arch() @property {
 	string a;
+	// OS
 	version (Windows) a = "w";
 	else version (linux) a = "l";
 	else version (OSX) a = "m";
-	else a = "u";
+	else a = "?";
 
+	// CPU
 	a ~= to!string(8 * size_t.sizeof);
-	
 	version (withPopCount) a ~= "p";
-	else version(ARM) a ~='a';
+	version(ARM) a ~='a';
+	else version(AARCH64) a ~='a';
+
+	// Compiler
+	a ~= '-';
+	version (LDC) a ~= 'l';
+	else version (GNU) a ~= 'g';
+	else version (DigitalMars) a ~= 'd';
+	else version (SDC) a ~= 's';
+	else a ~= '?';
 
 	return a;
 }
@@ -47,6 +57,7 @@ class Uci {
 	Moves moves;
 	shared util.Message message;	
 	Time [Color.size] time;
+	Option option;
 	int depthMax, movesToGo, multipv;
 	ulong nodesMax;
 	bool canPonder, isPondering, easy;
@@ -102,7 +113,7 @@ class Uci {
 		message.send("id name " ~ name);
 		message.send("id author Richard Delorme");
 		message.send("option name Ponder type check default false");
-		message.send("option name Hash type spin default 64 min 1 max 4096");
+		message.send("option name Hash type spin default 64 min 1 max ", 4096 * Entry.sizeof);
 		message.send("option name Log type check default ", message.isLogging());
 		message.send("option name MultiPV type spin default 1 min 1 max 256");
 		message.send("option name UCI_AnalyseMode type check default false");
