@@ -45,17 +45,21 @@ endif
 ifeq ($(DC),ldc2)
 	DFLAGS =  -singleobj -w -dw -mcpu=$(CPU)
 	ifeq ($(BUILD),fast)
-		DFLAGS += -O3 -release -boundscheck=off -enable-cross-module-inlining
+		DFLAGS += -O3 -release -boundscheck=off -flto=full -enable-cross-module-inlining
 	else ifeq ($(BUILD),old)
 		DFLAGS += -O3 -release
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -O0 -g -gc
 	else ifeq ($(BUILD),unittest)
-		DFLAGS += -O3 -unittest -boundscheck=off -enable-cross-module-inlining
+		DFLAGS += -O3 -unittest -boundscheck=off -flto=full -enable-cross-module-inlining
 	endif
 	ifeq ($(POPCOUNT),true)
 		DFLAGS += -d-version=withPopCount -mattr=popcnt
 	endif
+	ifeq ($(WINDOWS),true)
+		DFLAGS += -mtriple=x86_64-pc-windows-mingw32 -gcc=x86_64-w64-mingw32-gcc --link-internally
+	endif
+	
 	PGO_GEN = -fprofile-instr-generate
 	PGO_USE = -fprofile-instr-use=amoeba.profdata
 	PGO_MERGE = ldc-profdata merge -output=amoeba.profdata amoeba-*.profraw
@@ -70,6 +74,8 @@ ifeq ($(DC),dmd)
 		DFLAGS = -g -gc -debug
 	else ifeq ($(BUILD),unittest)
 		DFLAGS = -unittest -boundscheck=off -cov
+	else ifeq ($(BUILD),cov)
+		DFLAGS = -O -release -inline -boundscheck=off -cov
 	endif
 	ifeq ($(POPCOUNT),true)
 		DFLAGS += -version=withPopCount
@@ -106,7 +112,7 @@ build-pgo :
 	$(MAKE) clean
 	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
 	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft --depth=6 | grep perft; 
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench --depth=14 --file bk.epd
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench --depth=16 --file bk.epd
 	$(PGO_MERGE)
 	$(DC) $(DFLAGS) $(PGO_USE) $(SRC)
 
@@ -115,6 +121,9 @@ debug : $(AMOEBA_SRC)
 
 pgo: $(AMOEBA_SRC)
 	$(MAKE) build-pgo EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+
+windows: $(AMOEBA_SRC)
+	$(MAKE) build EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT) WINDOWS=true
 
 unittest:$(AMOEBA_SRC)
 	$(MAKE) BUILD=unittest EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
