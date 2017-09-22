@@ -175,7 +175,7 @@ int toCastling(const char c) {
  * Zobrist key
  */
 struct Key {
-	ulong code;
+	ulong zobrist;
 
 	static immutable ulong [Square.size][CPiece.size] square;
 	static immutable ulong [Castling.size] castling;
@@ -198,10 +198,10 @@ struct Key {
 	/* set the key from a position */
 	void set(const Board board) {
 		const Board.Stack *s = &board.stack[board.ply];
-		code = color[board.player];
-		foreach (Square x; Square.a1 .. Square.size) code ^= square[board[x]][x];
-		code ^= enpassant[s.enpassant];
-		code ^= castling[s.castling];
+		zobrist = color[board.player];
+		foreach (Square x; Square.a1 .. Square.size) zobrist ^= square[board[x]][x];
+		zobrist ^= enpassant[s.enpassant];
+		zobrist ^= castling[s.castling];
 	}
 
 	/* update the key with a move */
@@ -212,25 +212,35 @@ struct Key {
 		const CPiece p = board[move.from];
 		const Board.Stack *s = &board.stack[board.ply];
 
-		code = s.key.code;
-		code ^= play;
+		zobrist = s.key.zobrist;
+		zobrist ^= play;
 		if (move != 0) {
-			code ^= square[p][move.from] ^ square[p][move.to];
-			code ^= square[board[move.to]][move.to];
+			zobrist ^= square[p][move.from] ^ square[p][move.to];
+			zobrist ^= square[board[move.to]][move.to];
 			if (toPiece(p) == Piece.pawn) {
-				if (move.promotion) code ^= square[p][move.to] ^ square[toCPiece(move.promotion, player)][move.to];
-				else if (s.enpassant == move.to) code ^= square[toCPiece(Piece.pawn, enemy)][toSquare(file(move.to), rank(move.from))];
+				if (move.promotion) zobrist ^= square[p][move.to] ^ square[toCPiece(move.promotion, player)][move.to];
+				else if (s.enpassant == move.to) zobrist ^= square[toCPiece(Piece.pawn, enemy)][toSquare(file(move.to), rank(move.from))];
 				else if (abs(move.to - move.from) == 16 && (board.mask[move.to].enpassant & (board.color[enemy] & board.piece[Piece.pawn]))) {
 					x = cast (Square) ((move.from + move.to) / 2);
 				}
 			} else if (toPiece(p) == Piece.king) {
 				CPiece r = toCPiece(Piece.rook, board.player);
-				if (move.to == move.from + 2) code ^= square[r][move.from + 3] ^ square[r][move.from + 1];
-				else if (move.to == move.from - 2) code ^= square[r][move.from - 4] ^ square[r][move.from - 1];
+				if (move.to == move.from + 2) zobrist ^= square[r][move.from + 3] ^ square[r][move.from + 1];
+				else if (move.to == move.from - 2) zobrist ^= square[r][move.from - 4] ^ square[r][move.from - 1];
 			}
-			code ^= enpassant[s.enpassant] ^ enpassant[x];
-			code ^= castling[s.castling] ^ castling[s.castling & board.mask[move.from].castling & board.mask[move.to].castling];
+			zobrist ^= enpassant[s.enpassant] ^ enpassant[x];
+			zobrist ^= castling[s.castling] ^ castling[s.castling & board.mask[move.from].castling & board.mask[move.to].castling];
 		}
+	}
+
+	/* index */
+	size_t index(const size_t mask) const {
+		return cast (size_t) (zobrist & mask);
+	}
+
+	/* code */
+	uint code() const @property {
+		return cast (uint) (zobrist >> 32);
 	}
 }
 
@@ -834,10 +844,8 @@ public:
 		player = toColor(s[1][0]);
 		if (player == Color.size) error("bad player's turn");
 
-		if (s.length > 5 && isNumeric(s[4])) {
-			stack[ply].fifty = std.conv.to!ubyte(s[4]);
-			plyOffset = 2 * (std.conv.to!int(s[5]) - 1) + player;
-		}
+		if (s.length > 4 && isNumeric(s[4])) stack[ply].fifty = std.conv.to!ubyte(s[4]);
+		if (s.length > 5 && isNumeric(s[5])) plyOffset = 2 * (std.conv.to!int(s[5]) - 1) + player;
 
 		if (s[2] != "-") {
 			foreach (c; s[2]) stack[ply].castling |= toCastling(c);
