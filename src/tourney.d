@@ -6,6 +6,7 @@
  */
 
 import util, board, move, game;
+import core.atomic;
 import std.algorithm, std.conv, std.format, std.getopt, std.parallelism, std.process, std.range, std.stdio, std.string;
 import std.math, std.mathspecial, std.random;
 
@@ -38,7 +39,7 @@ private:
 			if (words[i] == "depth") info.depth = cast (ubyte) max(0, min(to!int(words[i + 1]), 255));
 			else if (words[i] == "cp") info.score = to!short(words[i + 1]);
 			else if (words[i] == "mate") {
-				int matein = to!int(words[i + 1]);
+				const int matein = to!int(words[i + 1]);
 				if (matein < 0) info.score = cast (short) (-Score.mate - matein * 2);
 				else if (matein > 0) info.score = cast (short)  (Score.mate - matein * 2 + 1);
 			} else if (words[i] == "time") info.time = 0.001 * to!int(words[i + 1]);
@@ -188,7 +189,7 @@ class Match {
 	}
 }
 
-enum Var { none, trinomial, pentanomial, all };
+enum Var { none, trinomial, pentanomial, all }
 
 /*
  * Sequential Probability Ratio test (SPRT)
@@ -220,17 +221,17 @@ private:
 
 	/* 5-nomial variance of the mean score (take care of game pair)*/
 	double var5() const {
-		double N = n[0] + n[1] + n[2] + n[3] + n[4];
-		double m = (n[1] * 0.5 + n[2] + n[3] * 1.5 + n[4] * 2.0) / N;
-		double v = (n[1] * 0.25 + n[2] + n[3] * 2.25 + n[4] * 4.0) / N - (m ^^ 2);
+		const double N = n[0] + n[1] + n[2] + n[3] + n[4];
+		const double m = (n[1] * 0.5 + n[2] + n[3] * 1.5 + n[4] * 2.0) / N;
+		const double v = (n[1] * 0.25 + n[2] + n[3] * 2.25 + n[4] * 4.0) / N - (m ^^ 2);
 		return v / (4 * N); // 4 is to rescale the variance as for one game
 	}
 
 	/* 3-nomial variance of the mean score*/
 	double var3() const {
-		double N = w + d + l;
-		double m = (w + d * 0.5) / N;
-		double v = (w + d * 0.25) / N - (m ^^ 2);
+		const double N = w + d + l;
+		const double m = (w + d * 0.5) / N;
+		const double v = (w + d * 0.25) / N - (m ^^ 2);
 		return v / N;
 	}
 
@@ -283,12 +284,12 @@ public:
 
 	/* compute llr for a given variance */
 	int LLR(const double v) const {
-		ulong n = w + d + l;
-		double score = (w + 0.5 * d) / n;
+		const ulong N = w + d + l;
+		const double score = (w + 0.5 * d) / N;
+		const double σ = sqrt(v);
+		const double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
+		const double los = v > 0.0 ? normalDistribution((min(max(score, 0.5 / N), 1 - 0.5 / N) - 0.5) / σ) : 0.5;
 		int end = 0;
-		double σ = sqrt(v);
-		double llr = v > 0.0 ? 0.5 * (score1 - score0) * (2 * score - score0 - score1) / v : 0.0;
-		double los = v > 0.0 ? normalDistribution((min(max(score, 0.5 / n), 1 - 0.5 / n) - 0.5) / σ) : 0.5;
 
 		writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
 		writefln("LOS: %.2f %%", 100.0 * los);
@@ -320,7 +321,7 @@ public:
 
 		if (v & Var.trinomial) {
 			writeln("Using variance of the trinomial distribution of single games:");
-			int e = LLR(var3());
+			const int e = LLR(var3());
 			if ((v & Var.pentanomial) && (e != end)) end = 0; else end = e;
 		}
 
@@ -360,7 +361,7 @@ public:
 	this(const string [] engineName, const string [] openingFile, string outputFile, const double elo0, const double elo1, const double α, const double β) {
 		openings = new shared GameBase;
 		foreach (o; openingFile) {
-			string ext = o[$ - 3..$].toLower();
+			const string ext = o[$ - 3..$].toLower();
 			if (ext == "pgn") openings.read(o);
 			else if (ext == "fen" || ext == "epd") openings.read!false(o);
 		}
@@ -416,7 +417,10 @@ public:
 	void loop(const int nGames, const double time, const Var v) {
 		shared bool done = false;
 		foreach (i; taskPool.parallel(iota(nGames))) {
-			if (!done) done = (match(i, openings.next(true), time, v) != 0);
+			if (!done) {
+				bool r = (match(i, openings.next(true), time, v) != 0);
+				done = atomicOp!"|"(done, r);
+			}
 		}
 		taskPool.finish(true);
 	}
@@ -473,7 +477,7 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 			++outcome[result + 1];
 		}
 
-		double n = outcome[0] + outcome[1] + outcome[2];
+		const double n = outcome[0] + outcome[1] + outcome[2];
 
 		stderr.writefln("Simulation for elo diff: %.2f; draw percentage %.2f%%; white advantage %.2f%%", elo, draw, whiteAdvantage);
 		stderr.writeln("White proba: ", W, " ; Black proba: ", B);
@@ -491,21 +495,21 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
-	int nGames = 30000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64;
+	int nGames = 30_000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64;
 	bool showVersion, showHelp, showDebug;
 	string [] engineName, openingFile;
 	string outputFile, var;
-	double H0 = 0.0, H1 = 5.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0;
+	double H0 = -2.0, H1 = 2.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0;
 	Var v;
 
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time, "hash", &hashSize,
 		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
-		"simulation", &nSimulation, "draw", &draw, "white", &white,
+		"simulation|s", &nSimulation, "draw", &draw, "white", &white,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
 		"debug|d", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.4\n© 2017 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.5\n© 2017 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
