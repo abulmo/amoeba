@@ -3,7 +3,6 @@
 #
 
 AMOEBA_SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
-EVOLVE_SRC = evolve.d util.d board.d eval.d game.d kpk.d move.d search.d weight.d
 TOURNEY_SRC = tourney.d board.d game.d move.d util.d 
 TUNE_SRC = tune.d util.d board.d eval.d game.d kpk.d move.d search.d weight.d
 
@@ -30,11 +29,12 @@ ifeq ($(DC),gdc)
 		DFLAGS +=  -O3 -frelease -fno-bounds-check  
 	else ifeq ($(BUILD),debug) 
 		DFLAGS += -O0 -g -fdebug 
-	else ifeq ($(BUILD),unittest)
-		DFLAGS += -O3 -funittest -fno-bounds-check 
 	endif
 	ifeq ($(POPCOUNT),true)
 		DFLAGS += -fversion=withPopCount -msse4.2 
+	endif
+	ifeq ($(GAME),true)
+		DFLAGS += -fversion=withGameSupport
 	endif
 	PGO_GEN = -fprofile-generate -lgcov
 	PGO_USE = -fprofile-use
@@ -46,20 +46,15 @@ ifeq ($(DC),ldc2)
 	DFLAGS =  -singleobj -w -dw -mcpu=$(CPU)
 	ifeq ($(BUILD),fast)
 		DFLAGS += -O3 -release -boundscheck=off -flto=full -enable-cross-module-inlining
-	else ifeq ($(BUILD),old)
-		DFLAGS += -O3 -release
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -O0 -g -gc
-	else ifeq ($(BUILD),unittest)
-		DFLAGS += -O3 -unittest -boundscheck=off -flto=full -enable-cross-module-inlining
 	endif
 	ifeq ($(POPCOUNT),true)
 		DFLAGS += -d-version=withPopCount -mattr=popcnt
 	endif
-	ifeq ($(WINDOWS),true)
-		DFLAGS += -mtriple=x86_64-pc-windows-mingw32 -gcc=x86_64-w64-mingw32-gcc --link-internally
+	ifeq ($(GAME),true)
+		DFLAGS += -d-version=withGameSupport
 	endif
-	
 	PGO_GEN = -fprofile-instr-generate
 	PGO_USE = -fprofile-instr-use=amoeba.profdata
 	PGO_MERGE = ldc-profdata merge -output=amoeba.profdata amoeba-*.profraw
@@ -72,13 +67,14 @@ ifeq ($(DC),dmd)
 		DFLAGS = -O -release -inline -boundscheck=off
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -g -gc -debug
-	else ifeq ($(BUILD),unittest)
-		DFLAGS = -unittest -boundscheck=off -cov
 	else ifeq ($(BUILD),cov)
 		DFLAGS = -O -release -inline -boundscheck=off -cov
 	endif
 	ifeq ($(POPCOUNT),true)
 		DFLAGS += -version=withPopCount
+	endif
+	ifeq ($(GAME),true)
+		DFLAGS += -version=withGameSupport
 	endif
 	PGO_GEN = 
 	PGO_USE = 
@@ -111,34 +107,21 @@ build :
 build-pgo :
 	$(MAKE) clean
 	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft --depth=6 | grep perft; 
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench --depth=16 --file bk.epd
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) < bench.uci
 	$(PGO_MERGE)
 	$(DC) $(DFLAGS) $(PGO_USE) $(SRC)
 
 debug : $(AMOEBA_SRC)
 	$(MAKE) BUILD=debug EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
-pgo: $(AMOEBA_SRC)
+amoeba: $(AMOEBA_SRC)
 	$(MAKE) build-pgo EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
-windows: $(AMOEBA_SRC)
-	$(MAKE) build EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT) WINDOWS=true
-
-unittest:$(AMOEBA_SRC)
-	$(MAKE) BUILD=unittest EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-amoeba: $(AMOEBA_SRC)
-	$(MAKE) EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-evolve: $(EVOLVE_SRC)
-	$(MAKE) EXE=evolve
-
 tourney: $(TOURNEY_SRC)
-	$(MAKE) EXE=tourney CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+	$(MAKE) EXE=tourney CPU=$(CPU) POPCOUNT=$(POPCOUNT) GAME=true
 
 tune: $(TUNE_SRC)
-	$(MAKE) EXE=tune CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+	$(MAKE) EXE=tune CPU=$(CPU) POPCOUNT=$(POPCOUNT)  GAME=true
 
 clean:
 	$(RM) *.o trace.* *.log *.gcda *.profraw *.profdata
