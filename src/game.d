@@ -10,7 +10,6 @@ import core.atomic;
 
 /*
  * A buffered file reader
- * TODO: RAII ?
  */
 struct Reader {
 	string line;
@@ -35,7 +34,7 @@ struct Reader {
 		return line;
 	}
 
-	/* unread a line (keep it const the buffer) */
+	/* unread a line (keep it in the buffer) */
 	void unread() {
 		skip = true;
 	}
@@ -57,7 +56,7 @@ private:
 		foreach (i; 1 .. line.length) {
 			if (isSpace(line[i])) return line[1 .. i];
 		}
-		claim(0);
+		unreachable();
 		return null;
 	}
 
@@ -280,15 +279,15 @@ public:
 	}
 
 	void random(Board b, ref Random r, const int depth) {
-		Moves moves;
+		Moves randomMoves = void;
 		Move m;
 		Info i = {book: true};
 
 		b.set();
 		foreach (d; 0 .. depth) {
-			moves.generate(b);
-			if (moves.length == 0) break;
-			m = moves[uniform(0, moves.length, r)];
+			randomMoves.generate(b);
+			if (randomMoves.length == 0) break;
+			m = randomMoves[uniform(0, randomMoves.length, r)];
 			push(m, i);
 			b.update(m);
 		}
@@ -297,7 +296,6 @@ public:
 	/* read a game from a simple PGN (no #annotation field) */
 	void read(ref Reader reader) {
 		string line, text;
-		string word;
 		Move m;
 		Info i;
 		Board board = new Board;
@@ -339,8 +337,6 @@ public:
 				board.update(m);
 			}
 		}
-
-		claim(infos.length == moves.length);
 	}
 
 	/* write a game */
@@ -349,8 +345,6 @@ public:
 		size_t a, b;
 		string text;
 		bool hasResult;
-
-		claim(infos.length == moves.length);
 
 		// tags
 		foreach (t; tags) {
@@ -411,7 +405,7 @@ shared class GameBase {
 
 	void opOpAssign(string op)(shared Game game) {
 		if (op == "~") games ~= game;
-		else claim(false);
+		else assert(0);
 	}
 
 	/* read all games (not thread safe) */
