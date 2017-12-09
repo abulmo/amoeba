@@ -10,21 +10,21 @@ import board, eval, kpk, move, util;
 import std.algorithm, std.conv, std.format, std.getopt, std.math, std.stdio, std.string;
 
 /* Hash table score bound */
-enum Bound {upper, lower, exact}
+enum Bound {none, upper, lower, exact}
 
 /*
  * Entry Table Entry
  */
 struct Entry {
-	uint code;
-	ushort info;
-	Move[2] move;
-	short value; // from search
-	short eval;  // static eval
+	uint code;    // zobrist key
+	ushort info;  // date / depth / bound
+	Move[2] move; // 2 best moves
+	short score;  // from search
+	short value;  // static eval
 
 	/* depth */
 	int depth() const @property {
-		return (info >> 2) & 127;
+		return ((info >> 2) & 127);
 	}
 
 	/* bound type */
@@ -43,22 +43,22 @@ struct Entry {
 	}
 
 	/* store common data to update & set into this entry */
-	void store(const Bound b, const int d, const int date, const int v, const int e) {
+	void store(const Bound b, const int d, const int date, const int s, const int v) {
 		info = cast (ushort) (b | (d << 2) | (date << 9));
+		score = cast (short) s;
 		value = cast (short) v;
-		eval = cast (short) e;
 	}
 
 	/* update an existing entry */
-	void update(const int d, const int date, const Bound b, const int v, const int e, const Move m) {
-		store(b, d, date, v, e);
+	void update(const int d, const int date, const Bound b, const int s, const int v, const Move m) {
+		store(b, d, date, s, v);
 		if (m != move[0]) { move[1] = move[0]; move[0] = m; }
 	}
 
 	/* set a new entry */
-	void set(const Key k, const int d, const int date, const Bound b, const int v, const int e, const Move m) {
+	void set(const Key k, const int d, const int date, const Bound b, const int s, const int v, const Move m) {
 		code = k.code;
-		store(b, d, date, v, e);
+		store(b, d, date, s, v);
 		move = [m, 0];
 	}
 
@@ -72,6 +72,7 @@ struct Entry {
  * Transposition table
  */
 final class TranspositionTable {
+	ulong nUsed;
 	enum size_t bucketSize = 4;
 	Entry [] entry;
 	size_t mask;
@@ -97,6 +98,7 @@ final class TranspositionTable {
 	void clear(const bool cleaner = true) {
 		if (cleaner || date == 127) {
 			date = 0;
+			if (cleaner) nUsed = 0;
 			foreach (ref h; entry) {
 				if (cleaner) h = Entry.init;
 				else h.info &= 511; // reset date to 0;
@@ -128,6 +130,7 @@ final class TranspositionTable {
 				return;
 			} else if (w.info > h.info) w = &h;
 		}
+		if (w.info == 0) ++nUsed;
 		w.set(k, depth, date, b, v, e, m);
 	}
 
@@ -140,6 +143,11 @@ final class TranspositionTable {
 	/* choose between lower & exact bound */
 	Bound bound(const int v, const int β) const {
 		return v >= β ? Bound.lower : Bound.exact;
+	}
+
+	/* return how full is the transposition table */
+	int full() const @property {
+		return cast (int) ((1000.0 * nUsed) / entry.length);
 	}
 }
 
@@ -172,38 +180,21 @@ private:
 	/* search option */
 	struct Option {
 		Termination termination;
-		double lmrDepth = 1.0, lmrMove = 0.5;
 		int depthInit;
 		int scoreInit;
 		int multiPv;
 		bool easy;
 		bool isPondering;
 		bool verbose;
-
-		string toString() const {
-			string s;
-
-			s = "Search setting:";
-			s ~= "\n - Time:  max: " ~ to!string(termination.time.max) ~ " s, extra:" ~ to!string(termination.time.extra);
-			s ~= " s\n - Nodes: max: " ~ to!string(termination.nodes.max);
-			s ~= "\n - Depth: max: " ~ to!string(termination.depth.max) ~ " init: " ~ to!string(depthInit);
-			s ~= "\n - Score: init: " ~ to!string(scoreInit);
-			s ~= "\n - MultiPv: " ~ to!string(multiPv);
-			s ~= "\n - easy: " ~ to!string(easy);
-			s ~= "\n - isPondering: " ~ to!string(isPondering);
-			s ~= "\n - verbose: " ~ to!string(verbose);
-
-			return s;
-		}
+		bool doPrune;
 	}
 
 	/* search Info */
 	struct Info {
-		ulong nNodes;
-		int [Limits.moves.max] score;
-		int depth;
-		double time;
 		Line [Limits.moves.max] pv;
+		ulong nNodes;
+		double time;
+		int [Limits.moves.max] score, depth, selDepth;
 		int multiPv;
 
 		/* save current search infos (except pv / score) */
@@ -212,18 +203,23 @@ private:
 		}
 
 		/* save current search infos (pv + score) */
-		void store(const int iPv, int s, ref Line p) {
+		void store(const int iPv, const int s, const int d, const int sd, const ref Line p) {
 			const Move m = p.move[0];
 			foreach (i; iPv + 1 .. multiPv) {
 				if (m == pv[i].move[0]) {
 					foreach_reverse (j; iPv .. i + 1) {
+						depth[j + 1] = depth[j];
+						selDepth[iPv + 1] = selDepth[j];
 						score[j + 1] = score[j];
 						pv[j + 1].set(pv[j]);
 					}
 					break;
 				}
 			}
-			score[iPv] = s;	pv[iPv].set(p);
+			depth[iPv] = d;
+			selDepth[iPv] = sd;
+			score[iPv] = s;
+			pv[iPv].set(p);
 		}
 
 		/* sort the pvs & score */
@@ -236,32 +232,30 @@ private:
 
 		/* clear results */
 		void clear(const int n, const int scoreInit) {
-			nNodes = 0; depth = 0; time = 0.0;
+			nNodes = 0; time = 0.0;
 			multiPv = n;
-			foreach (i; 0 .. multiPv) {
-				score[i] = 0;
-				pv[i].clear();
-			}
+			depth[] = 0; selDepth[] = 0; score[] = 0;
+			foreach (i; 0 .. multiPv) pv[i].clear();
 			score[0] = scoreInit;
 		}
 
 		/* write the search results found so far using UCI protocol */
-		string toUCI(const int iPv) const {
-			ulong t = cast (ulong) (1000 * time);
-			ulong speed = cast (ulong) (nNodes / time);
+		string toUCI(const int iPv, TranspositionTable tt) const {
 			string s;
 
 			foreach (i; 0 .. multiPv) {
-				auto d = depth - (i > iPv);
-				s ~= "info depth " ~ to!string(d);
+				s ~= "info depth " ~ to!string(depth[i]);
+				s ~= " selDepth " ~ to!string(selDepth[i]);
 				if (multiPv > 1) s ~= " multipv " ~ to!string(i + 1);
 				s ~= " score ";
 				if (score[i] > Score.high) s ~= "mate " ~ to!string((Score.mate + 1 - score[i]) / 2);
 				else if (score[i] < Score.low) s ~= "mate " ~ to!string(-(Score.mate + score[i]) / 2);
+				else if (score[i] < 0) s ~= "cp " ~ to!string(score[i] / 2);
 				else s ~= "cp " ~ to!string(score[i]);
 				s ~=  " nps " ~ to!string(cast (ulong) (nNodes / time));
 				s ~= " time " ~ to!string(cast (ulong) (1000 * time));
 				s ~= " nodes " ~ to!string(nNodes);
+				s ~= " hashfull " ~ to!string(tt.full);
 				s ~= " pv " ~ pv[i].toString();
 				if (i + 1 < multiPv) s ~= '\n';
 			}
@@ -280,7 +274,7 @@ private:
 	Move [2][Limits.ply.max + 1] killer;
 	Move [Limits.move.size] refutation;
 	ulong nNodes;
-	int ply, iPv;
+	int ply, iPv, selDepth;
 	Chrono timer;
 	bool stop;
 	
@@ -301,7 +295,7 @@ private:
 			if (message) {
 				if (option.isPondering && message.has("ponderhit")) {
 					option.isPondering = false;
-					message.log("ponderhit> time: %.3f ; timeMax: %.3f ⭢ %.3f", time, option.termination.time.max, time + option.termination.time.max);
+					message.log(format("ponderhit> time: %.3f ; timeMax: %.3f ⭢ %.3f", time, option.termination.time.max, time + option.termination.time.max));
 					option.termination.time.max += time;
 					option.termination.time.extra += time;
 				} else if (message.has("stop")) {
@@ -375,9 +369,14 @@ private:
 		return reduction[min(d, 31)][min(m, 31)];
 	}
 
+	/* get an eval margin to prune */
+	static int margin(const int d) {
+		return d ? 200 * d - 100 : 50;
+	}
+
 	/* quiescence search */
 	int qs(int α, int β) {
-		enum δ = 200;
+		enum δ = margin(0);
 		const bool isPv = (α + 1 < β);
 		int s, bs, v = Score.mate;
 		Moves moves = void;
@@ -398,11 +397,11 @@ private:
 
 		// transposition table probe
 		if (tt.probe(board.key, h)) {
-			s = fromHash(h.value);
+			s = fromHash(h.score);
 			if (h.bound == Bound.lower && (α = s) >= β) return s;
 			else if (h.bound == Bound.upper && (β = s) <= α) return s;
 			else if (h.bound == Bound.exact) return s;
-			v = fromHash(h.eval);
+			v = fromHash(h.value);
 			if ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v)) v = s;
 		} else v = eval(board, α, β);
 
@@ -415,11 +414,14 @@ private:
 
 		//max depth reached
 		if (ply == Limits.ply.max) return eval(board, α, β);
+		
+		if (ply > selDepth) selDepth = ply;
 
 		// move generation: good captures & promotions if not in check
 		moves.setup(board.inCheck, h.move);
 
 		while ((m = moves.selectMove(board).move) != 0) {
+			if (board.see(m) < 0) continue;
 			s = eval(board, m) + v + δ;
 			if (s > α || isPv || board.inCheck || board.giveCheck(m)) {
 				update(m);
@@ -429,7 +431,7 @@ private:
 			if (stop) break;
 			if (s > bs && (bs = s) > α) {
 				tt.store(board.key, board.inCheck, tt.bound(bs, β), toHash(bs), toHash(v), m);
-				if ((α = bs) >= β) break;
+				if ((α = bs) >= β) return bs;
 			}
 		}
 
@@ -439,7 +441,7 @@ private:
 	}
 
 	/* alpha-beta search (PVS/negascout variant) */
-	int αβ(int α, int β, const int d, const bool doPrune = true) {
+	int αβ(int α, int β, const int d, const bool doPrune) {
 		const bool isPv = (α + 1 < β);
 		int v, s, bs, e, r, iQuiet;
 		Moves moves = void;
@@ -464,14 +466,14 @@ private:
 
 		// transposition table probe
 		if (tt.probe(board.key, h) && !isPv) {
-			s = fromHash(h.value);
+			s = fromHash(h.score);
 			if (h.depth >= d || s <= ply - Score.mate || s >= Score.mate - ply - 1) {
 				if (h.bound == Bound.lower && s >= β) return s;
 				else if (h.bound == Bound.upper && s <= α) return s;
 				else if (h.bound == Bound.exact) return s;
 				if (h.bound != Bound.upper && s > bs) bs = s;
 			}
-			v = fromHash(h.eval);
+			v = fromHash(h.value);
 			if ((h.bound == Bound.lower && s > v) || (h.bound == Bound.upper && s < v)) v = s;
 		} else v = eval(board);
 
@@ -482,7 +484,7 @@ private:
 		bool isSafe = !(isPv || board.inCheck || α >= Score.big || β <= -Score.big);
 		if (doPrune && isSafe) {
 			// pruning
-			const  δ = 200 * d - 100;
+			const  δ = margin(d);
 			const sα = α - δ;
 			const sβ = β + δ;
 
@@ -495,16 +497,16 @@ private:
 			if (d >= 2 && v >= β && (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king]))) {
 				r = 3 + d / 4 + min((v - β) / 128, 3);
 				update(0);
-					s = -αβ(-β, -β + 1, d - r);
+					s = -αβ(-β, -β + 1, d - r, true);
 				restore(0);
 				if (!stop && s >= β) {
 					if (s >= Score.high) s = β;
-					if (d < 12 ||  αβ(β - 1, β, d - r, false) >= β) {
+					if (d < 12 ||  (s = αβ(β - 1, β, d - r, false)) >= β) {
 						tt.store(board.key, d, Bound.lower, toHash(s), toHash(v), h.move[0]);
 						return s;
 					}
 				}
-				isSafe = (s > Score.low);
+				isSafe = (s > -Score.big);
 			}
 		}
 
@@ -526,7 +528,7 @@ private:
 		// generate moves in order & loop through them
 		while ((m = (i = moves.selectMove(board)).move) != 0) {
 
-			const bool isTactical = (i.value > 0) || (isPv && (board.isTactical(m) || board.giveCheck(m)));
+			const bool isTactical = (i.value > 0) || (isPv && (board.isTactical(m) || board.giveCheck(m) || board.inCheck));
 			iQuiet += !isTactical;
 			// late move pruning
 			if (isSafe && !isTactical && iQuiet > 4 + d * d && !board.giveCheck(m)) continue;
@@ -540,15 +542,15 @@ private:
 			update(m);
 				// principal variation search (pvs)
 				if (moves.isFirst(m)) {
-					s = -αβ(-β, -α, d + e - 1);
+					s = -αβ(-β, -α, d + e - 1, option.doPrune);
 				} else {
 					// late move reduction (lmr)
 					r = isTactical ? 0 : reduce(d, iQuiet);
 					// null window search (nws)
-					s = -αβ(-α - 1, -α, d + e - r - 1);
+					s = -αβ(-α - 1, -α, d + e - r - 1, option.doPrune);
 					// new pv found or new bestscore (bs) at reduced depth ?
 					if ((α < s && s < β) || (s > bs && r > 0)) {
-						s = -αβ(-β, -α, d + e - 1);
+						s = -αβ(-β, -α, d + e - 1, option.doPrune);
 					}
 				}
 			restore(m);
@@ -584,36 +586,37 @@ private:
 		const int v = eval(board, α, β);
 
 		pv[0].clear();
+		selDepth = 0;
 
 		// loop thru all moves (and order them)
 		for (int i = iPv; i < rootMoves.length; ++i) {
 			Move m = rootMoves[i];
-			const bool isTactical = rootMoves.item[i].value > 0 || board.isTactical(m) || board.giveCheck(m);
+			const bool isTactical = rootMoves.item[i].value > 0 || board.isTactical(m) || board.giveCheck(m) || board.inCheck;
 			// check extension (if move is not losing)
 			e = (board.giveCheck(m) && board.see(m) >= 0);
 
 			pv[1].clear();
 			update(m);
 				// principal variation search (pvs)
-				if (rootMoves.isFirst(m)) {
-					s = -αβ(-β, -α, d + e - 1);
+				if (i == iPv) {
+					s = -αβ(-β, -α, d + e - 1, option.doPrune);
 				} else {
 					// late move reduction (lmr)
 					r = isTactical ? 0 : reduce(d, iQuiet);
 					// null window search (nws)
-					s = - αβ(-α - 1, -α, d + e - r - 1);
+					s = - αβ(-α - 1, -α, d + e - r - 1, option.doPrune);
 					// new pv ?
 					if ((α < s && s < β) || (s > bs && r > 0)) {
-						s = -αβ(-β, -α, d + e - 1);
+						s = -αβ(-β, -α, d + e - 1, option.doPrune);
 					}
 				}
 			restore(m);
+			info.update(nNodes, d, time);
 			if (stop) break;
 			if (s > bs && (bs = s) > α) {
 				rootMoves.setBest(m, iPv);
 				pv[0].set(m, pv[1]);
-				info.update(nNodes, d, time);
-				info.store(iPv, bs, pv[0]);
+				info.store(iPv, s, d, selDepth, pv[0]);
 				if (iPv == 0) tt.store(board.key, d, tt.bound(bs, β), toHash(bs), toHash(v), m);
 				if ((α = bs) >= β) {
 					if (!board.isTactical(m) && !board.inCheck) heuristicsUpdate(m, d);
@@ -621,15 +624,12 @@ private:
 				}
 			} else if (i == iPv) {
 				pv[0].set(m, pv[1]);
-				info.store(iPv, s, pv[0]);
+				info.store(iPv, s, d, selDepth, pv[0]);
 			}
 			if (!board.isTactical(m) && !board.inCheck) history.updateBad(board, m, d * d);
 		}
 
 		if (!stop && iPv == 0 && bs <= αOld) tt.store(board.key, d, Bound.upper, toHash(bs), toHash(v), rootMoves[0]);
-
-		// store results
-		info.update(nNodes, d, time);
 	}
 
 	/* aspiration window */
@@ -670,9 +670,9 @@ private:
 		foreach (i; 0 .. n) rootMoves.setBest(info.pv[i].move[0], i);
 
 		if (option.verbose) {
-			if (message) message.send(info.toUCI(n));
-			else writeln(info.toUCI(n));
-		} else if (message) message.log!'>'(info.toUCI(n));
+			if (message) message.send(info.toUCI(n, tt));
+			else writeln(info.toUCI(n, tt));
+		} else if (message) message.log!'>'(info.toUCI(n, tt));
 	}
 
 	/* clear search setting before searching */
@@ -692,12 +692,25 @@ private:
 	bool persist(const int d) const {
 		return checkTime(0.618034 * option.termination.time.max)
 		    && !stop && d <= option.termination.depth.max
-		    && (option.multiPv > 1 || (info.score[0] <= Score.mate - d && info.score[0] >= d - Score.mate));
+		    && (option.multiPv > 1 || (info.score[0] <= Score.mate - (d - 4) && info.score[0] >= (d - 4) - Score.mate));
 	}
 
 	/* search limited on some moves */
 	void keepMoves(const ref Moves moves) {
 		rootMoves = moves;
+	}
+
+	/* check position easyness and diminish thinking time if a position look easy */
+	void adjustTime(const int d) {
+		if (option.easy && d > 4) {
+			Option o = option;
+			option.verbose = false;
+			multiPv(option.multiPv = 2, 4);
+			option = o;
+			if (info.score[0] > info.score[1] + 128) {
+				option.termination.time.max *= 0.5;
+			}
+		}
 	}
 
 public:
@@ -708,6 +721,7 @@ public:
 		tt = new TranspositionTable(size);
 		message = null;
 		option.verbose = true;
+		option.doPrune = true;
 		clear();
 		setReduction(1.1, 0.7);
 	}
@@ -733,7 +747,6 @@ public:
 		}
 	}
 
-
 	/* set board */
 	void set(bool copy = true)(Board b) {
 		Entry h;
@@ -744,7 +757,8 @@ public:
 		while ((m = rootMoves.selectMove(board).move) != 0) {}
 		if (h.bound == Bound.exact && h.move[0] == rootMoves[0]) {
 			option.depthInit = max(1, h.depth);
-			option.scoreInit = fromHash(h.value);
+			option.scoreInit = fromHash(h.score);
+			if (abs(option.scoreInit) >= Score.mate - option.depthInit) option.depthInit = max(0, Score.mate - abs(option.scoreInit)); // to force entering the search
 		} else {
 			option.depthInit = 1;
 			option.scoreInit = 0;
@@ -753,12 +767,13 @@ public:
 	}
 
 	/* go search */
-	void go(const ref Termination t, const ref Moves moves, const bool easy = false, const int doMultiPv = 1, bool ponder = false) {
+	void go(const ref Termination t, const ref Moves moves, const bool easy = false, const int doMultiPv = 1, const bool ponder = false, const bool doPrune = true) {
 		timer.start();
 			option.termination = t;
 			option.isPondering = ponder;
 			option.multiPv = max(1, min(doMultiPv, rootMoves.length));
 			option.easy = easy;
+			option.doPrune = doPrune;
 			setup();
 			if (moves.length > 0) keepMoves(moves);
 			if (message) {
@@ -771,6 +786,7 @@ public:
 			} else if (option.easy && rootMoves.length == 1) {
 				multiPv(option.multiPv, option.depthInit);
 			} else  {
+				adjustTime(option.depthInit);
 				for (int d = option.depthInit; persist(d); ++d) {
 					multiPv(option.multiPv, d);
 				}
@@ -788,22 +804,9 @@ public:
 			option.isPondering = false;
 			option.multiPv = 1;
 			option.easy = false;
-			info.score = αβ(2 - Score.mate, Score.mate - 1, d);
+			option.doPrune = true;
+			info.score = αβ(2 - Score.mate, Score.mate - 1, d, option.doPrune);
 		timer.stop();
-	}
-
-	/* show settings */
-	void showSetting() {
-		if (message) {
-			message.send(" setting> ", option.toString());
-			message.send(" setting> TT size: ", tt.entry.length, " entries, ", tt.entry.length * Entry.sizeof, " B");
-			message.send(" setting> ", eval.setting());
-		}
-	}
-
-	/* show settings */
-	void showMoves() {
-		rootMoves.dump();
 	}
 
 	/* get the best move */
@@ -821,106 +824,5 @@ public:
 	int score() const @property {
 		return info.score[0];
 	}
-}
-
-
-/*
- * Test the search quality using an epd file
- */
-
-/* Look if epd best moves match the best move found. */
-bool epdMatch(string epd, Board b, const Move found) {
-	write("found ", found.toSan(b));
-	string [] solutions = epd.findBetween("bm", ";").split();
-	if (solutions.length > 0) {
-		write("; expected = ", solutions);
-		foreach (s; solutions) {
-			const Move m = fromSan(s, b);
-			if (m == found) return true;
-		}
-		return false;
-	} else {
-		string [] mistakes = epd.findBetween("am", ";").split();
-		if (mistakes.length > 0) {
-			write("; unexpected = ", mistakes);
-			foreach (s; mistakes) {
-				const Move m = fromSan(s, b);
-				if (m == found) return false;
-			}
-		}
-	}
-	return true;
-}
-
-/* Test the search using an epd file */
-int epdTest(string [] arg, const bool checkSolution = true) {
-	double t = double.infinity, T = 0, D = 0;
-	int d = Limits.ply.max, n, nGoods;
-	size_t ttSize = 256;
-	ulong N;
-	string epdFile;
-	bool verbose, help, dbg;
-	Termination termination;
-	Moves moves;
-
-	getopt(arg, std.getopt.config.caseSensitive, "movetime|t", &t, "depth|d", &d, "hash|H", &ttSize,
-		"verbose|v", &verbose, "file|f", &epdFile, "debug|g", &dbg, "help|h", &help);
-	if (help) {
-		stderr.writeln(arg[0] ~ " [--movetime|-t <time>] [--depth|-d <depth>] [--hash|-H] [--verbose|-v <bool>] --file|-f <epd file> [--help|-h]");
-		if (arg[0] == "bench") stderr.writefln("Test search speed on a set of positions.");
-		else if (arg[0] == "epd") stderr.writefln("Test search performance on a set of positions.");
-		stderr.writefln("\t--movetime|-t <time>  Maximum time per move in seconds (default: %s)", t);
-		stderr.writefln("\t--depth|-d <depth>    Maximum depth time per move in seconds (default: %s)", d);
-		stderr.writefln("\t--hash|-H <size>      Hash size in Mb (default %s MB)", ttSize);
-		stderr.writefln("\t--verbose|-v          More verbose output (default: %s)", verbose);
-		stderr.writefln("\t--debug|-g            Log on to a debug file (default: %s)", dbg);
-		stderr.writeln("\t--file|-f <epd file>   EPD file to test");
-		stderr.writeln("\t--help|-h              Display this help\n");
-	}
-
-	termination.time.max = termination.time.extra = t;
-	termination.depth.max = min(d, Limits.ply.max);
-	termination.nodes.max = ulong.max;
-	moves.clear();
-	ttSize = min(65536, max(1, ttSize));
-	Search s = new Search(ttSize * 1024 * 1024);
-	s.message = new shared Message("Amoeba-epdtest");
-	if (dbg) s.message.logOn();
-	s.option.verbose = verbose;
-	Board b = new Board;
-	writefln("*** epdTest  depth: %d, time: %.3fs, memory: %d MB ***", d, t, ttSize);
-	auto f = std.stdio.File(epdFile);
-
-	foreach (line; f.byLine()) {
-		string epd = to!string(line).chomp();
-		if (epd == "" || epd[0] == '#') continue;
-		b.set(epd);
-		if (verbose) {
-			writeln();
-			writeln(b);
-		}
-		s.clear();
-		s.set(b);
-		s.go(termination, moves);
-		if (checkSolution && epdMatch(epd, b, s.bestMove)) ++nGoods;
-		T += s.info.time;
-		N += s.info.nNodes;
-		D += s.info.depth;
-		++n;
-		if (checkSolution) writefln(": %d founds / %d problems ", nGoods, n);
-	}
-
-	if (checkSolution) writef("epd: %d founds / %d problems ", nGoods, n);
-	else writef("bench: %d positions ", n);
-	writefln(" %d nodes in %.3fs : %.0f nps, depth = %.2f", N, T, N / T, D / n);
-	stdout.flush();
-
-	return (100 * nGoods) / n;
-}
-
-/* Unittest */
-unittest {
-	writeln("");
-	claim(epdTest(["epd", "-t", "1", "-f", "bk.epd"]) >= 40);
 }
 
