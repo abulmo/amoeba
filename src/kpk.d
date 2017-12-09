@@ -10,19 +10,19 @@ import board, eval, util;
 import std.algorithm, std.stdio;
 
 private:
-enum {illegal = 0, unknown = 1, draw = 2, win = 4};
+enum {illegal = 0, unknown = 1, draw = 2, win = 4}
 enum size = 24 * 64 * 64 * 2;
 shared byte [size] result;
 
 /* compute the index to the result table from the square coordinates */
 int getIndex(const Square p, const Square wk, const Square bk, const Color c) {
-	int x = 4 * rank(p) + file(p) - 4;
+	const int x = 4 * rank(p) + file(p) - 4;
 	return (x << 13) | (wk << 7) | (bk << 1) | c;
 }
 
 /* from an index, compute the position */
 void getSquares(const int i, ref Square p, ref Square wk, ref Square bk, ref Color player) {
-	int x = i >> 13;
+	const int x = i >> 13;
 	p  = toSquare(x & 3, x / 4 + 1);
 	wk = cast (Square) ((i >> 7) & 63);
 	bk = cast (Square) ((i >> 1) & 63);
@@ -131,27 +131,12 @@ int rescale(const Board b, const int value) {
 			p ^= 7; bk ^= 7; wk ^= 7;
 		}
 
-		int i = getIndex(p, wk, bk, player);
+		const int i = getIndex(p, wk, bk, player);
 
 		if (result[i] == win) return value * 4;
 		else return value / 16;
 	}
 
 	return value;
-}
-
-/* check correctness of algorithm */
-unittest {
-	int [5] count;
-
-	init();
-
-	write("\nTesting kpk..."); stdout.flush();
-	foreach (r; result) count[r]++;
-	claim(count[win] == 111282);
-	claim(count[draw] == 54394);
-	claim(count[unknown] == 0);
-	claim(count[illegal] == 30932);
-	writeln("ok"); stdout.flush();
 }
 
