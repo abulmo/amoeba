@@ -186,7 +186,7 @@ struct Key {
 	/* initialize Zobrist keys with pseudo random numbers */
 	shared static this() {
 		Mt19937 r;
-		r.seed(19937);
+		r.seed(19_937);
 		foreach (p; CPiece.wpawn .. CPiece.size)
 		foreach (x; Square.a1 .. Square.size) square[p][x] = uniform(ulong.min, ulong.max, r);
 		foreach (c; Castling.K .. Castling.size) castling[c] = uniform(ulong.min, ulong.max, r);
@@ -304,58 +304,60 @@ struct Mask {
  */
 enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, size}
 
-/* to string */
-string fromResult(bool longFormat)(const Result r) {
-	with (Result) {
-		if (longFormat) final switch (r) {
-			case none: return "*";
-			case draw: return "{Draw} 1/2-1/2";
-			case repetitionDraw: return "{Draw by repetition} 1/2-1/2";
-			case fiftyDraw: return "{Draw by fifty-move rule} 1/2-1/2";
-			case insufficientMaterialDraw: return "{Draw by insufficient material} 1/2-1/2";
-			case stalemateDraw: return "{Stalemate} 1/2-1/2";
-			case whiteWin: return "{White wins} 1-0";
-			case blackWin: return "{Black wins} 0-1";
-			case size: return "";
-		} else switch(r) {
-			case none: return "*";
-			case whiteWin: return "1-0";
-			case blackWin: return "0-1";
-			default: return "1/2-1/2";
+version (withGameSupport) {
+	/* to string */
+	string fromResult(bool longFormat)(const Result r) {
+		with (Result) {
+			if (longFormat) final switch (r) {
+				case none: return "*";
+				case draw: return "{Draw} 1/2-1/2";
+				case repetitionDraw: return "{Draw by repetition} 1/2-1/2";
+				case fiftyDraw: return "{Draw by fifty-move rule} 1/2-1/2";
+				case insufficientMaterialDraw: return "{Draw by insufficient material} 1/2-1/2";
+				case stalemateDraw: return "{Stalemate} 1/2-1/2";
+				case whiteWin: return "{White wins} 1-0";
+				case blackWin: return "{Black wins} 0-1";
+				case size: return "";
+			} else switch(r) {
+				case none: return "*";
+				case whiteWin: return "1-0";
+				case blackWin: return "0-1";
+				default: return "1/2-1/2";
+			}
 		}
 	}
-}
 
-/* game result */
-bool toResult(string text, ref Result r) {
-	size_t a, b;
-	string s;
+	/* game result */
+	bool toResult(string text, ref Result r) {
+		size_t a, b;
+		string s;
 
-	while (text[a].isSpace()) ++a;
-	for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
-	s = text[a .. b];
-	if (s == "1-0") r = Result.whiteWin;
-	else if (s == "0-1") r = Result.blackWin;
-	else if (s == "1/2-1/2") r = Result.draw;
-	else if (s == "*") r = Result.none;
-	else return false;
-	return true;
-}
+		while (text[a].isSpace()) ++a;
+		for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
+		s = text[a .. b];
+		if (s == "1-0") r = Result.whiteWin;
+		else if (s == "0-1") r = Result.blackWin;
+		else if (s == "1/2-1/2") r = Result.draw;
+		else if (s == "*") r = Result.none;
+		else return false;
+		return true;
+	}
 
-/* game result (duplicated for shared data) */
-bool toResult(string text, ref shared Result r) {
-	size_t a, b;
-	string s;
+	/* game result (duplicated for shared data) */
+	bool toResult(string text, ref shared Result r) {
+		size_t a, b;
+		string s;
 
-	while (text[a].isSpace()) ++a;
-	for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
-	s = text[a .. b];
-	if (s == "1-0") r = Result.whiteWin;
-	else if (s == "0-1") r = Result.blackWin;
-	else if (s == "1/2-1/2") r = Result.draw;
-	else if (s == "*") r = Result.none;
-	else return false;
-	return true;
+		while (text[a].isSpace()) ++a;
+		for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
+		s = text[a .. b];
+		if (s == "1-0") r = Result.whiteWin;
+		else if (s == "0-1") r = Result.blackWin;
+		else if (s == "1/2-1/2") r = Result.draw;
+		else if (s == "*") r = Result.none;
+		else return false;
+		return true;
+	}
 }
 
 /* Kind of move Generation */
@@ -591,11 +593,11 @@ private:
 		const ulong occupancy = ~piece[Piece.none];
 		const ulong P = color[player];
 
-		return attack!(Piece.bishop)(x, P & (piece[Piece.bishop] | piece[Piece.queen]), occupancy)
-			|| attack!(Piece.rook)(x, P & (piece[Piece.rook] | piece[Piece.queen]), occupancy)
-			|| attack!(Piece.knight)(x, P & piece[Piece.knight])
-			|| attack!(Piece.pawn)(x, P & piece[Piece.pawn], occupancy, opponent(player))
-			|| attack!(Piece.king)(x, P & piece[Piece.king]);
+		return attack(Piece.bishop, x, P & (piece[Piece.bishop] | piece[Piece.queen]), occupancy)
+			|| attack(Piece.rook, x, P & (piece[Piece.rook] | piece[Piece.queen]), occupancy)
+			|| attack(Piece.knight, x, P & piece[Piece.knight])
+			|| attack(Piece.pawn, x, P & piece[Piece.pawn], occupancy, opponent(player))
+			|| attack(Piece.king, x, P & piece[Piece.king]);
 	}
 
 	/* generate all moves from a square */
@@ -673,47 +675,6 @@ private:
 	}
 
 public:
-	/* Compute pins & checkers */
-	void setPinsCheckers(ref ulong checkers, ref ulong pins) const {
-		const Color enemy = opponent(player);
-		const Square k = xKing[player];
-		const ulong bq = (piece[Piece.bishop] + piece[Piece.queen]) & color[enemy];
-		const ulong rq = (piece[Piece.rook] + piece[Piece.queen]) & color[enemy];
-		const ulong occupancy = ~piece[Piece.none];
-		ulong partialCheckers;
-		ulong b;
-		Square x;
-
-		pins = 0;
-		// bishop or queen
-		b = coverage!(Piece.bishop)(k, occupancy);
-		checkers = partialCheckers = b & bq;
-		b &= color[player];
-		if (b) {
-			b = attack!(Piece.bishop)(k, bq ^ partialCheckers, occupancy ^ b);
-			while (b) {
-				x = popSquare(b);
-				pins |= mask[k].between[x] & color[player];
-			}
-		}
-
-		// rook or queen: all square reachable from the king square.
-		b = coverage!(Piece.rook)(k, occupancy);
-		checkers |= partialCheckers = b & rq;
-		b &= color[player];
-		if (b) {
-			b = attack!(Piece.rook)(k, rq ^ partialCheckers, occupancy ^ b);
-			while (b) {
-				x = popSquare(b);
-				pins |= mask[k].between[x] & color[player];
-			}
-		}
-		// other occupancy (no more pins)
-		checkers |= attack!(Piece.knight)(k, piece[Piece.knight]);
-		checkers |= attack!(Piece.pawn)(k, piece[Piece.pawn], occupancy, player);
-		checkers &= color[enemy];
-	}
-
 	/* slider attack function along a rank */
 	static ulong rankAttack(const ulong occupancy, const Square x) {
 		const int f = x & 7;
@@ -738,40 +699,21 @@ public:
 	}
 
 	/* Coverage by a piece */
-	static ulong coverage(Piece p)(const Square x, const ulong occupancy = 0, const Color c = Color.white) {
-		static if (p == Piece.pawn) return mask[x].pawnAttack[c]; // piece advance excluded!
-		else static if (p == Piece.knight) return mask[x].knight;
-		else static if (p == Piece.bishop) return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x);
-		else static if (p == Piece.rook) return fileAttack(occupancy, x) + rankAttack(occupancy, x);
-		else static if (p == Piece.queen) return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x) + fileAttack(occupancy, x) + rankAttack(occupancy, x);
-		else static if (p == Piece.king) return mask[x].king;
-	}
-
-	/* Attack (coverage on some target) */
-	static ulong attack(Piece p)(const Square x, const ulong target, const ulong occupancy = 0, const Color c = Color.white) {
-		return coverage!p(x, occupancy, c) & target;
-	}
-
-
-	/* Coverage by a piece */
 	static ulong coverage(Piece p, const Square x, const ulong occupancy = 0, const Color c = Color.white) {
 		final switch(p) {
-			case Piece.pawn:
-				return mask[x].pawnAttack[c];
-			case Piece.knight:
-				return mask[x].knight;
-			case Piece.bishop:
-				return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x);
-			case Piece.rook:
-				return fileAttack(occupancy, x) + rankAttack(occupancy, x);
-			case Piece.queen:
-				return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x) + fileAttack(occupancy, x) + rankAttack(occupancy, x);
-			case Piece.king:
-				return mask[x].king;
-			case Piece.none, Piece.size:
-				claim(false);
-				return 0;
+			case Piece.pawn:   return mask[x].pawnAttack[c];
+			case Piece.knight: return mask[x].knight;
+			case Piece.bishop: return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x);
+			case Piece.rook:   return fileAttack(occupancy, x) + rankAttack(occupancy, x);
+			case Piece.queen:  return diagonalAttack(occupancy, x) + antidiagonalAttack(occupancy, x) + fileAttack(occupancy, x) + rankAttack(occupancy, x);
+			case Piece.king:   return mask[x].king;
+			case Piece.none, Piece.size: return 0;
 		}
+	}
+
+	/* Coverage by a piece */
+	static ulong attack(Piece p, const Square x, const ulong target, const ulong occupancy = 0, const Color c = Color.white) {
+		return coverage(p, x, occupancy, c) & target;
 	}
 
 	void clear() {
@@ -868,8 +810,6 @@ public:
 		setPinsCheckers(stack[ply].checkers, stack[ply].pins);
 		stack[ply].key.set(this);
 		stack[ply].pawnKey.set(this);
-
-		if (!verify()) error("bad board");
 
 		return this;
 	}
@@ -988,11 +928,11 @@ public:
 		Square x;
 
 		// bishop or queen
-		b = coverage!(Piece.bishop)(k, occupancy);
+		b = coverage(Piece.bishop, k, occupancy);
 		partialCheckers = b & bq;
 		b &= color[c];
 		if (b) {
-			b = attack!(Piece.bishop)(k, bq ^ partialCheckers, occupancy ^ b);
+			b = attack(Piece.bishop, k, bq ^ partialCheckers, occupancy ^ b);
 			while (b) {
 				x = popSquare(b);
 				pins |= mask[k].between[x] & color[c];
@@ -1000,11 +940,11 @@ public:
 		}
 
 		// rook or queen: all square reachable from the king square.
-		b = coverage!(Piece.rook)(k, occupancy);
+		b = coverage(Piece.rook, k, occupancy);
 		partialCheckers = b & rq;
 		b &= color[c];
 		if (b) {
-			b = attack!(Piece.rook)(k, rq ^ partialCheckers, occupancy ^ b);
+			b = attack(Piece.rook, k, rq ^ partialCheckers, occupancy ^ b);
 			while (b) {
 				x = popSquare(b);
 				pins |= mask[k].between[x] & color[c];
@@ -1012,6 +952,47 @@ public:
 		}
 
 		return pins;
+	}
+
+	/* Compute pins & checkers */
+	void setPinsCheckers(ref ulong checkers, ref ulong pins) const {
+		const Color enemy = opponent(player);
+		const Square k = xKing[player];
+		const ulong bq = (piece[Piece.bishop] + piece[Piece.queen]) & color[enemy];
+		const ulong rq = (piece[Piece.rook] + piece[Piece.queen]) & color[enemy];
+		const ulong occupancy = ~piece[Piece.none];
+		ulong partialCheckers;
+		ulong b;
+		Square x;
+
+		pins = 0;
+		// bishop or queen
+		b = coverage(Piece.bishop, k, occupancy);
+		checkers = partialCheckers = b & bq;
+		b &= color[player];
+		if (b) {
+			b = attack(Piece.bishop, k, bq ^ partialCheckers, occupancy ^ b);
+			while (b) {
+				x = popSquare(b);
+				pins |= mask[k].between[x] & color[player];
+			}
+		}
+
+		// rook or queen: all square reachable from the king square.
+		b = coverage(Piece.rook, k, occupancy);
+		checkers |= partialCheckers = b & rq;
+		b &= color[player];
+		if (b) {
+			b = attack(Piece.rook, k, rq ^ partialCheckers, occupancy ^ b);
+			while (b) {
+				x = popSquare(b);
+				pins |= mask[k].between[x] & color[player];
+			}
+		}
+		// other occupancy (no more pins)
+		checkers |= attack(Piece.knight, k, piece[Piece.knight]);
+		checkers |= attack(Piece.pawn, k, piece[Piece.pawn], occupancy, player);
+		checkers &= color[enemy];
 	}
 
 	/* 50-move rule counter */
@@ -1084,33 +1065,14 @@ public:
 		int check = 0;
 
 		// direct check...
-		final switch(p) {
-		case Piece.pawn:
-			if (attack!(Piece.pawn)(to, K, O, player)) ++check;
-			break;
-		case Piece.knight:
-			if (attack!(Piece.knight)(to, K, O, player)) ++check;
-			break;
-		case Piece.bishop:
-			if (attack!(Piece.bishop)(to, K, O, player)) ++check;
-			break;
-		case Piece.rook:
-			if (attack!(Piece.rook)(to, K, O, player)) ++check;
-			break;
-		case Piece.queen:
-			if (attack!(Piece.queen)(to, K, O, player)) ++check;
-			break;
-		case Piece.king: // castling
-			if (to == from + 2 && attack!(Piece.rook)(cast (Square) (from + 1), K, O, player)) ++check;
-			else if (to == from + 2 && attack!(Piece.rook)(cast (Square) (from - 1), K, O, player)) ++check;
-			break;
-		case Piece.none, Piece.size:
-			claim(false);
-		}
+		if (p == Piece.king) {
+			if (to == from + 2 && attack(Piece.rook, cast (Square) (from + 1), K, O, player)) ++check;
+			else if (to == from + 2 && attack(Piece.rook, cast (Square) (from - 1), K, O, player)) ++check;
+		} else if (attack(p, to, K, O, player)) ++check;
 
 		// discovered check
-		if ((dir == 7 || dir == 9) && attack!(Piece.bishop)(k, P & (piece[Piece.bishop] | piece[Piece.queen]), O)) ++check;
-		else if ((dir == 1 || dir == 8) && attack!(Piece.rook)(k, P & (piece[Piece.rook] | piece[Piece.queen]), O)) ++check;
+		if ((dir == 7 || dir == 9) && attack(Piece.bishop, k, P & (piece[Piece.bishop] | piece[Piece.queen]), O)) ++check;
+		else if ((dir == 1 || dir == 8) && attack(Piece.rook, k, P & (piece[Piece.rook] | piece[Piece.queen]), O)) ++check;
 
 		return check;
 	}
@@ -1138,9 +1100,6 @@ public:
 
 	/* Play a move on the board */
 	void update(const Move move) {
-		debug claim(verify());
-		debug claim(move == 0 || isLegal!true(move));
-
 		const to = mask[move.to].bit;
 		const enemy = opponent(player);
 		const p = toPiece(cpiece[move.from]);
@@ -1189,14 +1148,10 @@ public:
 		player = enemy;
 		setPinsCheckers(n.checkers, n.pins);
 		++ply;
-
-		debug claim(verify());
 	}
 
 	/* Undo a move on the board */
 	void restore(const Move move) {
-		debug claim(verify());
-
 		const ulong to = mask[move.to].bit;
 		const Color enemy = player;
 		const p = move.promotion ? Piece.pawn : toPiece(cpiece[move.to]);
@@ -1231,9 +1186,6 @@ public:
 				xKing[player] = move.from;
 			}
 		}
-
-		debug claim(verify());
-		debug claim(move == 0 || isLegal!true(move));
 	}
 
 	/* play a sequence of moves */
@@ -1267,7 +1219,7 @@ public:
 
 		// king evades
 		piece[Piece.none] ^= mask[k].bit;
-		target = attack!(Piece.king)(k, ~color[player]);
+		target = attack(Piece.king, k, ~color[player]);
 		while (target) {
 			to = popSquare(target);
 			if (!isSquareAttacked(to, enemy)) moves.push(k, to);
@@ -1285,12 +1237,12 @@ public:
 				from = cast (Square) (x - 1);
 				if (file(to) > 0 && cpiece[from] == toCPiece(Piece.pawn, player)) {
 					o = occupancy ^ mask[from].bit ^ mask[x].bit ^ mask[to].bit;
-					if (!attack!(Piece.rook)(k, rq & color[enemy], o)) moves.push(from, to);
+					if (!attack(Piece.rook, k, rq & color[enemy], o)) moves.push(from, to);
 				}
 				from = cast (Square) (x + 1);
 				if (file(to) < 7 && cpiece[from] == toCPiece(Piece.pawn, player)) {
 					o = occupancy ^ mask[from].bit ^ mask[x].bit ^ mask[to].bit;
-					if (!attack!(Piece.rook)(k, rq & color[enemy], o)) moves.push(from, to);
+					if (!attack(Piece.rook, k, rq & color[enemy], o)) moves.push(from, to);
 				}
 			}
 
@@ -1305,21 +1257,21 @@ public:
 			attacker = piece[Piece.knight] & pinfree;
 			while (attacker) {
 				from = popSquare(attacker);
-				generateMoves(moves, attack!(Piece.knight)(from, target), from);
+				generateMoves(moves, attack(Piece.knight, from, target), from);
 			}
 
 			// bishop or queen
 			attacker = bq & pinfree;
 			while (attacker) {
 				from = popSquare(attacker);
-				generateMoves(moves, attack!(Piece.bishop)(from, target, occupancy), from);
+				generateMoves(moves, attack(Piece.bishop, from, target, occupancy), from);
 			}
 
 			// rook or queen
 			attacker = rq & pinfree;
 			while (attacker) {
 				from = popSquare(attacker);
-				generateMoves(moves, attack!(Piece.rook)(from, target, occupancy), from);
+				generateMoves(moves, attack(Piece.rook, from, target, occupancy), from);
 			}
 		}
 	}
@@ -1358,12 +1310,12 @@ public:
 			from = cast (Square) (x - 1);
 			if (file(to) > 0 && cpiece[from] == toCPiece(Piece.pawn, player)) {
 				o = occupancy ^ (mask[from].bit | mask[x].bit | mask[to].bit);
-				if (!attack!(Piece.bishop)(k, bq & color[enemy], o) && !attack!(Piece.rook)(k, rq & color[enemy], o)) moves.push(from, to);
+				if (!attack(Piece.bishop, k, bq & color[enemy], o) && !attack(Piece.rook, k, rq & color[enemy], o)) moves.push(from, to);
 			}
 			from = cast (Square) (x + 1);
 			if (file(to) < 7 && cpiece[from] == toCPiece(Piece.pawn, player)) {
 				o = occupancy ^ (mask[from].bit | mask[x].bit | mask[to].bit);
-				if (!attack!(Piece.bishop)(k, bq & color[enemy], o) && !attack!(Piece.rook)(k, rq & color[enemy], o)) moves.push(from, to);
+				if (!attack(Piece.bishop, k, bq & color[enemy], o) && !attack(Piece.rook, k, rq & color[enemy], o)) moves.push(from, to);
 			}
 		}
 
@@ -1405,7 +1357,7 @@ public:
 		attacker = piece[Piece.knight] & pinfree;
 		while (attacker) {
 			from = popSquare(attacker);
-			generateMoves(moves, attack!(Piece.knight)(from, target), from);
+			generateMoves(moves, attack(Piece.knight, from, target), from);
 		}
 
 		// bishop or queen (pins)
@@ -1421,7 +1373,7 @@ public:
 		attacker = bq & pinfree;
 		while (attacker) {
 			from = popSquare(attacker);
-			generateMoves(moves, attack!(Piece.bishop)(from, target, occupancy), from);
+			generateMoves(moves, attack(Piece.bishop, from, target, occupancy), from);
 		}
 
 		// rook or queen (pins)
@@ -1437,134 +1389,25 @@ public:
 		attacker = rq & pinfree;
 		while (attacker) {
 			from = popSquare(attacker);
-			generateMoves(moves, attack!(Piece.rook)(from, target, occupancy), from);
+			generateMoves(moves, attack(Piece.rook, from, target, occupancy), from);
 		}
 
 		// king
-		attacked = attack!(Piece.king)(k, target);
+		attacked = attack(Piece.king, k, target);
 		while (attacked) {
 			to = popSquare(attacked);
 			if (!isSquareAttacked(to, enemy)) moves.push(k, to);
 		}
 	}
 
-	/* verify board integrity */
-	bool verify() const {
-		const ulong o = ~piece[Piece.none];
-		const int[2] push = [8, -8];
-		ulong b;
-
-		bool error(string msg) const {
-			stderr.writeln(toString());
-			stderr.writeln(msg);
-			return false;
-		}
-
-		// player to move
-		if (player != Color.white && player != Color.black) return error(format("bad player %s", player));
-
-		// bitboard: 1 color per square
-		if (color[Color.white] & color[Color.black]) {
-				writeln(Color.white); writeBitboard(color[Color.white]);
-				writeln(Color.black); writeBitboard(color[Color.black]);
-
-			return error("colors intersect");
-		}
-
-		// bitboard: 1 piece per square
-		foreach (p; Piece.none .. Piece.size)
-		foreach (q; Piece.none .. Piece.size) {
-			if (p != q && piece[p] & piece[q]) {
-				writeln(p); writeBitboard(piece[p]);
-				writeln(q); writeBitboard(piece[q]);
-				return error(format("pieces  %s & %s intersect", p, q));
-			}
-		}
-
-		// bitboard: each piece with 1 color
-		b = 0;
-		foreach(p; Piece.pawn .. Piece.size) b |= piece[p];
-		if (b != o) {
-			writeln("colors :"); writeBitboard(o);
-			writeln("pieces :"); writeBitboard(b);
-			return error("pieces / colors mismatch");
-		}
-
-		// mailbox matches bitboards
-		foreach(Piece p; Piece.pawn .. Piece.size)
-		foreach(c; Color.white .. Color.black) {
-			b = piece[p] & color[c];
-			while (b) {
-				Square x = popSquare(b);
-				if (cpiece[x] != toCPiece(p, c)) {
-					writeln(c, " ", p, ":"); writeBitboard(piece[p] & color[c]);
-					return error(format("board array differs from %s %s bitboard at %s", c, p, x));
-				}
-			}
-		}
-
-		// bitboards match mailbox
-		foreach(x; Square.a1 .. Square.size) {
-			b = mask[x].bit;
-			Piece p = toPiece(cpiece[x]);
-			Color c = toColor(cpiece[x]);
-			if ((b & piece[p]) == 0) {
-				writeln(p); writeBitboard(piece[p]);
-				return error(format("%s bitboard different to board array at %s", p, x));
-			}
-			if (p != Piece.none && (b & piece[p] & color[c]) == 0) {
-				writeln(c); writeBitboard(color[c]);
-				return error(format("%s colors different to board array at %s", c, x));
-			}
-		}
-
-		// valid en passant Square
-		if (stack[ply].enpassant != Square.none) {
-			Square x = cast (Square) (stack[ply].enpassant - push[player]);
-			if (cpiece[x] != toCPiece(Piece.pawn, opponent(player))) return error(format("bad enpassant Square: %s", stack[ply].enpassant));
-		}
-
-		// 2 kings
-		foreach(c; Color.white .. Color.black) {
-			b = piece[Piece.king] & color[c];
-			if (!hasSingleBit(b)) error(format("bad %s king", c));
-			Square x = popSquare(b);
-			if (c != player && isSquareAttacked(x, opponent(c))) error(format("king %s going to be captures", x));
-		}
-
-		// valid castling
-		int castling = 15;
-		if (cpiece[Square.e1] == CPiece.wking) {
-			if (cpiece[Square.h1] != CPiece.wrook) castling &= ~1;
-			if (cpiece[Square.a1] != CPiece.wrook) castling &= ~2;
-		} else castling &= ~3;
-		if (cpiece[Square.e8] == CPiece.bking) {
-			if (cpiece[Square.h8] != CPiece.brook) castling &= ~4;
-			if (cpiece[Square.a8] != CPiece.brook) castling &= ~8;
-		} else castling &= ~12;
-		if ((castling & stack[ply].castling) != stack[ply].castling) return error(format("bad castling status: %s", stack[ply].castling));
-
-		// xKing
-		if (cpiece[xKing[Color.white]] != CPiece.wking) return error(format("bad white king coordinate: %s", xKing[Color.white]));
-		if (cpiece[xKing[Color.black]] != CPiece.bking) return error(format("bad black king coordinate: %s", xKing[Color.black]));
-
-		// valid key
-		Key k;
-		k.set(this);
-		if (k.code != stack[ply].key.code) return error(format("bad key %s vs %s", k.code, stack[ply].key));
-
-		return true;
-	}
-
 	/* does a move put its own king in check */
 	bool checkOwnKing (const Move move) {
-		const ulong occupancy = ~piece[Piece.none];
-		Piece p = toPiece(cpiece[move.from]);
-		Color enemy = opponent(player);
-		CPiece victim = cpiece[move.to];
+		const Piece p = toPiece(cpiece[move.from]);
+		const Color enemy = opponent(player);
+		const CPiece victim = cpiece[move.to];
 		bool inCheck;
 
-		// king const check after the move ?
+		// king in check after the move ?
 		piece[Piece.none] ^= mask[move.to].bit | mask[move.from].bit;
 		if (victim) {
 			color[enemy] ^= mask[move.to].bit;
@@ -1590,49 +1433,37 @@ public:
 	}
 	
 	/* is a move legal */
-	bool isLegal(bool verbose = false) (const Move move) {
+	bool isLegal(const Move move) {
 		const ulong occupancy = ~piece[Piece.none];
 		Piece p = toPiece(cpiece[move.from]);
 		Color enemy = opponent(player);
 		CPiece victim = cpiece[move.to];
-		enum Reason { none, wrongDeplacement, wrongColor, obstacle, blockedSquare, wrongCapture, missingPromotion, wrongPromotion,
-			wrongVictim, illegalCastling, kingInCheck, illegalMissed }
-
-		bool fail(const Reason r) {
-			debug if (verbose) {
-				writeln(toString());
-				writeln(move.toPan(), " (", move, ")");
-				writeln("reason ", r);
-				claim(false);
-			}
-			return false;
-		}
 
 		// legal deplacement ?
-		if (!legal[p][(move ^ (player * 3640)) & Limits.move.mask]) return fail(Reason.wrongDeplacement);
+		if (!legal[p][(move ^ (player * 3640)) & Limits.move.mask]) return false;
 
 		// bad piece color ?
-		if (toColor(cpiece[move.from]) != player) return fail(Reason.wrongColor);
+		if (toColor(cpiece[move.from]) != player) return false;
 
 		// obstacle on a slider's trajectory ?
-		if (mask[move.from].between[move.to] & occupancy) return fail(Reason.obstacle);
+		if (mask[move.from].between[move.to] & occupancy) return false;
 
 		// bad pawn move ?
 		if (p == Piece.pawn) {
 			if (mask[move.from].direction[move.to] == 8 || mask[move.from].direction[move.to] == 16) {
 				// push to an empty square ?
-				if (victim) return fail(Reason.blockedSquare);
+				if (victim) return false;
 			} else {
-				if (!victim && move.to != stack[ply].enpassant) return fail(Reason.wrongCapture); // capture ?
+				if (!victim && move.to != stack[ply].enpassant) return false; // capture ?
 			}
-			if ((rank(move.to) == 0 || rank(move.to) == 7) && !move.promotion) return fail(Reason.missingPromotion); // promotion ?
-			if (rank(move.to) > 0 && rank(move.to) < 7 && move.promotion) return fail(Reason.wrongPromotion);
+			if ((rank(move.to) == 0 || rank(move.to) == 7) && !move.promotion) return false; // promotion ?
+			if (rank(move.to) > 0 && rank(move.to) < 7 && move.promotion) return false;
 		} else {
-			if (move.promotion) return fail(Reason.wrongPromotion);
+			if (move.promotion) return false;
 		}
 
 		// bad victim ?
-		if (victim && (toColor(victim) == player || toPiece(victim) == Piece.king)) return fail(Reason.wrongVictim);
+		if (victim && (toColor(victim) == player || toPiece(victim) == Piece.king)) return false;
 
 		// illegal castling ?
 		if (p == Piece.king) {
@@ -1641,29 +1472,22 @@ public:
 				   (!canCastleKingside
 				|| (~piece[Piece.none] & mask[k].between[k + 3])
 				|| isSquareAttacked(cast (Square) (k + 1), enemy)
-				|| isSquareAttacked(cast (Square) (k + 2), enemy))) return fail(Reason.illegalCastling);
+				|| isSquareAttacked(cast (Square) (k + 2), enemy))) return false;
 			if ((k == move.to + 2) &&
 				   (!canCastleQueenside()
 				|| (~piece[Piece.none] & mask[k].between[k - 4])
 				|| isSquareAttacked(cast (Square) (k - 1), enemy)
-				|| isSquareAttacked(cast (Square) (k - 2), enemy))) return fail(Reason.illegalCastling);
+				|| isSquareAttacked(cast (Square) (k - 2), enemy))) return false;
 		}
 
-		if (checkOwnKing(move)) return fail(Reason.kingInCheck);
-
-		debug {
-			Moves moves = void;
-			moves.generate(this);
-			foreach (m; moves) if (move == m) return true;
-			return fail(Reason.illegalMissed);
-		}
+		if (checkOwnKing(move)) return false;
 
 		return true;
 	}
 
 	/* guess a move from SAN information */
-	Move guess(const Piece p, const Square to, const int f, const int r, const Piece promotion, const bool capture) {
-		CPiece cp = toCPiece(p, player);
+	version (withGameSupport) Move guess(const Piece p, const Square to, const int f, const int r, const Piece promotion, const bool capture) {
+		const CPiece cp = toCPiece(p, player);
 		Square from;
 		const int [2] push = [8, -8];
 		Move move;
@@ -1708,25 +1532,25 @@ public:
 		// loop...
 		switch (next[last[c]]) {
 		case Piece.pawn:
-			attacker = attack!(Piece.pawn)(to, piece[Piece.pawn] & P, occupancy, enemy);
+			attacker = attack(Piece.pawn, to, piece[Piece.pawn] & P, occupancy, enemy);
 			if (attacker) return victim(Piece.pawn);
 			goto case;
 		case Piece.knight:
-			attacker = attack!(Piece.knight)(to, piece[Piece.knight] & P);
+			attacker = attack(Piece.knight, to, piece[Piece.knight] & P);
 			if (attacker) return victim(Piece.knight);
 			goto case;
 		case Piece.bishop:
-			attacker = attack!(Piece.bishop)(to, piece[Piece.bishop] & P, occupancy);
+			attacker = attack(Piece.bishop, to, piece[Piece.bishop] & P, occupancy);
 			if (attacker) return victim(Piece.bishop);
 			goto case;
 		case Piece.rook:
-			attacker = attack!(Piece.rook)(to, piece[Piece.rook] & P, occupancy);
+			attacker = attack(Piece.rook, to, piece[Piece.rook] & P, occupancy);
 			if (attacker) return victim(Piece.rook);
 		// queen
-			attacker = attack!(Piece.queen)(to, piece[Piece.queen] & P, occupancy);
+			attacker = attack(Piece.queen, to, piece[Piece.queen] & P, occupancy);
 			if (attacker) return victim(Piece.queen);
 		// king
-			attacker = attack!(Piece.king)(to, piece[Piece.king] & P);
+			attacker = attack(Piece.king, to, piece[Piece.king] & P);
 			if (attacker) return victim(Piece.king);
 			goto default;
 		default:
@@ -1760,96 +1584,6 @@ public:
 		}
 
 		return score;
-	}
-
-	/* run perft: test correctness & speed of the move generator */
-	ulong perft (const int depth, const bool div = false) {
-		Moves moves = void;
-		ulong count, total;
-
-		moves.generate(this);
-
-		if (!div && depth == 1) return moves.length;
-
-		foreach (Move m; moves) {
-			update(m);
-				if (div && depth == 1) count = 1;
-				else count = perft(depth - 1);
-				total += count;
-				if (div) writefln("%5s %16d", m.toPan(), count);
-			restore(m);
-		}
-
-		return total;
-	}
-}
-
-/* perft with arguments */
-void perft(string[] arg, Board init) {
-	Board board = init ? init : new Board;
-	int depth = 6;
-	bool div, help;
-	ulong total;
-	Chrono t;
-	string fen;
-
-	if (init) {
-		getopt(arg, "div", &div, "depth|d", &depth, "help|h", &help);
-		if (help) writeln("perft [--depth <depth>] [--div] [--help]");
-	} else {
-		getopt(arg, "fen|f", &fen, "div", &div, "depth|d", &depth, "help|h", &help);
-		if (help) writeln("perft [--depth|-d <depth>] [--div] [--fen|-f <fen>] [--help|-h]");
-		if (fen.length > 0) board.set(fen);
-		else board.set();
-	}
-	writeln(board);
-
-	t.start();
-	total = depth > 0 ? board.perft(depth, div) : 1;
-	writefln("perft %d: %d leaves const %.3fs (%.0f leaves/s)", depth, total, t.time(), total / t.time());
-}
-
-/* Test the correctness of the move generator */
-unittest {
-	struct TestBoard {
-		string comments;
-		string fen;
-		int depth;
-		ulong result;
-	}
-
-	writeln("Testing the board generator");
-	TestBoard [] tests = [
-		{"1. Initial position ", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 6, 119060324},
-		{"2.", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 5, 193690690},
-		{"3.", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -", 7, 178633661},
-		{"4.", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 6, 706045033},
-		{"5.", "rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6", 3, 53392},
-		{"6.", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 6, 6923051137},
-		{"7.", "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1", 6, 824064},
-		{"8. Enpassant capture gives check", "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1", 6, 1440467},
-		{"9. Short castling gives check", "5k2/8/8/8/8/8/8/4K2R w K - 0 1", 6, 661072},
-		{"10. Long castling gives check", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 6, 803711},
-		{"11. Castling", "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1", 4, 1274206},
-		{"12. Castling prevented", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1", 4, 1720476},
-		{"13. Promote ref of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 6, 3821001},
-		{"14. Discovered check", "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1", 5, 1004658},
-		{"15. Promotion gives check", "4k3/1P6/8/8/8/8/K7/8 w - - 0 1", 6, 217342},
-		{"16. Underpromotion gives check", "8/P1k5/K7/8/8/8/8/8 w - - 0 1", 6, 92683},
-		{"17. Self stalemate", "K1k5/8/P7/8/8/8/8/8 w - - 0 1", 6, 2217},
-		{"18. Stalemate/Checkmate", "8/k1P5/8/1K6/8/8/8/8 w - - 0 1", 7, 567584},
-		{"19. Double check", "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1", 4, 23527},
-	];
-	Board b = new Board;
-
-	foreach (test; tests) {
-		write("Test ", test.comments); stdout.flush();
-		b.set(test.fen);
-		claim(b.toFen()[0 .. test.fen.length] == test.fen);
-		claim(b.perft(test.depth) == test.result);
-		b.mirror();
-		claim(b.perft(test.depth) == test.result);
-		writeln(" passed"); stdout.flush();
 	}
 }
 
