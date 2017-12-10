@@ -245,7 +245,7 @@ private:
 
 			foreach (i; 0 .. multiPv) {
 				s ~= "info depth " ~ to!string(depth[i]);
-				s ~= " selDepth " ~ to!string(selDepth[i]);
+				s ~= " seldepth " ~ to!string(selDepth[i]);
 				if (multiPv > 1) s ~= " multipv " ~ to!string(i + 1);
 				s ~= " score ";
 				if (score[i] > Score.high) s ~= "mate " ~ to!string((Score.mate + 1 - score[i]) / 2);
