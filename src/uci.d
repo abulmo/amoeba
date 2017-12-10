@@ -10,7 +10,7 @@ import board, eval, move, search, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
 
 /* version */
-enum string versionNumber = "2.6";
+enum string versionNumber = "2.7";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -59,7 +59,7 @@ class Uci {
 	Time [Color.size] time;
 	int depthMax, movesToGo, multipv;
 	ulong nodesMax;
-	bool canPonder, isPondering, easy;
+	bool canPonder, isPondering, infiniteSearch, easy;
 
 	/* constructor */
 	this(const bool dbg = false) {
@@ -102,7 +102,7 @@ class Uci {
 
 		t = (time[p].remaining + time[p].increment) * 0.1;
 		if (t <= 0) t = double.infinity;
-		t = min(maxTime, max(2.0 * maxTime, t));
+		t = max(maxTime, min(2.0 * maxTime, t));
 
 		return t;
 	}
@@ -122,14 +122,14 @@ class Uci {
 
 	/* setoption command */
 	void setoption(string line) {
-		string name = findBetween(line.chomp(), "name", "value").strip().toLower();
+		const string option = findBetween(line.chomp(), "name", "value").strip().toLower();
 		findSkip(line, "value");
 		string value = line.strip().toLower();
-		if (name == "ponder") canPonder = to!bool(value);
-		else if (name == "hash") search.resize(to!size_t(value) * 1024 * 1024);
-		else if (name == "multipv") multipv = to!int(value);
-		else if (name == "uci_analysemode") easy = !to!bool(value);
-		else if (name == "log") {
+		if (option == "ponder") canPonder = to!bool(value);
+		else if (option == "hash") search.resize(to!size_t(value) * 1024 * 1024);
+		else if (option == "multipv") multipv = to!int(value);
+		else if (option == "uci_analysemode") easy = !to!bool(value);
+		else if (option == "log") {
 			if (to!bool(value)) message.logOn();
 			else message.logOff();
 		}
@@ -172,12 +172,13 @@ class Uci {
 	void go(string line) {
 		Termination termination;
 		string [] words = line.split();
+		bool doPrune = true;
 
 		moves.clear();
 		termination.depth.max = Limits.ply.max;
 		termination.nodes.max = ulong.max;
 		foreach(c ; Color.white .. Color.size) time[c].clear();
-		isPondering = false;
+		isPondering = infiniteSearch = false;
 		foreach(i, ref w ; words) {
 			if (w == "searchmoves") searchmoves(words);
 			else if (w == "ponder") isPondering = true;
@@ -188,45 +189,22 @@ class Uci {
 			else if (w == "movestogo" && i + 1 < words.length) movesToGo = to!int(words[i + 1]);
 			else if (w == "depth" && i + 1 < words.length) termination.depth.max = to!int(words[i + 1]);
 			else if (w == "nodes" && i + 1 < words.length) termination.nodes.max = to!ulong(words[i + 1]);
-			else if (w == "mate" && i + 1 < words.length) termination.depth.max = to!int(words[i + 1]); /* TODO: turnoff selective search? */
-			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
-			else if (w == "infinite") termination.depth.max =  Limits.ply.max;
+			else if (w == "mate") {
+				doPrune = false;
+				if (i + 1 < words.length) termination.depth.max = to!int(words[i + 1]);
+			} else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
+			else if (w == "infinite") { termination.depth.max =  Limits.ply.max; infiniteSearch = true; }
 		}
 		termination.time.max = setTime();
 		termination.time.extra = setExtraTime(termination.time.max);
 
-		search.go(termination, moves, (easy && multipv == 1), multipv, isPondering);
-		if (!isPondering) bestmove();
+		search.go(termination, moves, (easy && multipv == 1), multipv, isPondering, doPrune);
+		if (!isPondering && !infiniteSearch) bestmove();
 	}
 
-	/* stop */
-	void stop() {
-		if (isPondering) bestmove();
-	}
-
-	/* show */
-	void show(string line) {
-		string [] words = line.split();
-		foreach(i, ref w ; words) {
-			if (w == "board") writeln(board);
-			else if (w == "moves") search.showMoves();
-			else if (w == "search") search.showSetting();
-			else if (w == "eval") search.eval.show(board);
-			else if (w == "weights") search.eval.showWeight();
-		}
-		stdout.flush();
-	}	
-
-	/* research */
-	void searchValue(string line) {
-		int depth = to!int(line.strip());
-		search.go(depth);
-		writeln("search ", depth, ": ", search.score);
-	}
-
-	/* research */
-	void eval() {
-		writeln("eval: ", search.eval(board, -Score.mate, Score.mate));
+	/* play a move after stop has been received or ponderHit */
+	void play() {
+		if (isPondering || infiniteSearch) bestmove();
 	}
 
 	/* main loop */
@@ -241,48 +219,15 @@ class Uci {
 			else if (findSkip(line, "setoption")) setoption(line);
 			else if (findSkip(line, "position")) position(line);
 			else if (findSkip(line, "go")) go(line);
-			else if (findSkip(line, "stop")) stop();
-			else if (findSkip(line, "ponderhit")) stop();
+			else if (findSkip(line, "stop")) play();
+			else if (findSkip(line, "ponderhit")) play();
 			else if (findSkip(line, "quit")) break;
 			// unused
 			else if (findSkip(line, "debug")) {}
 			else if (findSkip(line, "register")) {}
-			// extension
-			else if (findSkip(line, "show")) show(line);
-			else if (findSkip(line, "search")) searchValue(line);
-			else if (findSkip(line, "eval")) eval();
-			else if (findSkip(line, "perft")) perft(("perft " ~ line).split, board);
+			// error
 			else message.log("error unknown command: '%s'", line);
 		}
 	}
-}
-
-/* unittest */
-unittest {
-	stderr.writeln("Testing uci protocol");
-	Uci uci = new Uci();
-	uci.message.push("uci");
-	uci.message.push("ucinewgame");
-	uci.message.push("position startpos moves e2e4");
-	uci.message.push("show board");
-	uci.message.push("show moves");
-	uci.message.push("show weights");
-	uci.message.push("show eval");
-	uci.message.push("isready");
-	uci.message.push("go depth 15");
-	uci.message.push("show search");
-	uci.message.push("position fen 8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - -");
-	uci.message.push("show board");
-	uci.message.push("show moves");
-	uci.message.push("show eval");
-	uci.message.push("go movetime 15000");
-	uci.message.push("show search");
-	uci.message.push("position fen 8/k7/3n4/1Q6/8/8/8/K7 b - -");
-	uci.message.push("show board");
-	uci.message.push("show moves");
-	uci.message.push("show eval");
-	uci.message.push("go btime 1000 binc 100");
-	uci.message.push("quit");
-	uci.loop(false);
 }
 
