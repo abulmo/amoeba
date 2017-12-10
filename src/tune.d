@@ -36,7 +36,6 @@ struct Vector {
 
 	/* operator overloading: V + W; V * W; etc. apply the operator to each member data */
 	Vector opBinary(string op)(const Vector V) const {
-		debug claim(V.length == length);
 		Vector R = Vector(length);
 		foreach (i; 0 .. length) mixin("R[i] = data[i] "~op~" V[i];");
 		return R;
@@ -72,18 +71,15 @@ struct Vector {
 
 	/* assignment operator overloading: apply the operator to each member data */
 	void opOpAssign(string op)(const Vector V) {
-		debug claim(V.length == length);
 		foreach (i; 0 .. length) mixin("data[i] "~op~"= V[i];");
 	}
 
 	/* indexed access */
 	double opIndex(const size_t i) const {
-		debug claim(i < length);
 		return data[i];
 	}
 	/* indexed access */
 	ref double opIndex(const size_t i) {
-		debug claim(i < length);
 		return data[i];
 	}
 
@@ -129,14 +125,14 @@ struct Sum {
 		static if (op == "+") {
 			error += x;
 			++n;
-		} else claim(0);
+		} else assert(0);
 	}
 
 	void opOpAssign(string op)(const ref Sum v) shared {
 		static if (op == "+") {
 			atomicOp!"+="(this.error, v.error);
 			atomicOp!"+="(this.n, v.n);
-		} else claim(0);
+		} else assert(0);
 	}
 }
 
@@ -154,8 +150,11 @@ double result(const Color c, const shared Game game) {
 	else return 0.5;
 }
 
+/* error type */
+enum ErrorType {absolute, square, logLikelihood}
+
 /* compute the error for a single thread */
-void getPartialError(const int id, shared GameBase games, const double [] weights, const double K, shared Sum *sum) {
+void getPartialError(const int id, shared GameBase games, const double [] weights, const double K, shared Sum *sum, const ErrorType errorType) {
 	double r, s;
 	shared Game game;
 	Sum part;
@@ -180,14 +179,23 @@ void getPartialError(const int id, shared GameBase games, const double [] weight
 			search.go(0);
 			s = sigmoid(search.score * K);
 			r = result(board.player, game);
-			part += ((r - s) ^^ 2);
+			if (errorType == ErrorType.logLikelihood) {     
+				if (r == 0.0) part += -log(1.0 - s);
+				else if (r == 1.0) part += -log(s);
+				else part += -2.0 * (log(1.0 - s) + log(s));
+      		} else if (errorType == ErrorType.square) {
+				part += ((r - s) ^^ 2);
+			} else if (errorType == ErrorType.absolute) {
+				part += abs(r - s);
+			} else {
+				unreachable();
+			}
 			board.update(m);
 		}
 	}
 	synchronized {
 		*sum += part;
 	}
-	debug write("id:", id, " ->", part, "; ");
 }
 
 /*
@@ -205,6 +213,7 @@ class Amoeba {
 	ulong nBoard;
 	int iter;
 	int nCpu;
+	ErrorType errorType;
 
 	/* constructor */
 	this (ref const double [] w, string gameFile, const int cpu) {
@@ -213,6 +222,7 @@ class Amoeba {
 		weights = w.dup;
 		games = new shared GameBase;
 		nCpu = cpu;
+		errorType = ErrorType.square;
 		if (gameFile !is null) games.read(gameFile, 20);
 		writeln("Amoeba running ", nCpu, " tasks in parallel");
 	}
@@ -246,10 +256,9 @@ class Amoeba {
 		immutable double [] w = weights.idup;
 		games.clear();
 
-		foreach (i; 0 .. nCpu) spawn(&getPartialError, i, games, w, K, &sum);
+		foreach (i; 0 .. nCpu) spawn(&getPartialError, i, games, w, K, &sum, errorType);
 		thread_joinAll();
 
-		debug writeln(" =>", sum);
 		++iter;
 		nBoard = sum.n;
 		return sum.error / sum.n;
@@ -258,10 +267,10 @@ class Amoeba {
 	/* eval stats */
 	void stats() {
 		double r, s;
-		int iGame, iMove, phase;
+		int iGame, iMove;
 
 		Board board = new Board;
-		Search search = new Search(65536);
+		Search search = new Search(65_536);
 		search.eval.setWeight(weights);
 		games.clear();
 
@@ -328,33 +337,45 @@ class Amoeba {
 		f.write("\t"); foreach (i; 28 ..  35) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe attack   [28-34]");
 		f.write("\t"); foreach (i; 35 ..  42) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe defense    [35-41]");
 		f.write("\t"); foreach (i; 42 ..  49) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe defense  [42-48]");
-		f.write("\t"); foreach (i; 49 ..  55) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [49-54]");
-		f.write("\t"); foreach (i; 55 ..  60) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [55-59]");
-		f.write("\t"); foreach (i; 60 ..  65) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [60-64]");
-		f.write("\t"); foreach (i; 65 ..  67) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [65-66]");
-		f.write("\t"); foreach (i; 67 ..  74) f.writef("%+7.4f, ", weight[i]); f.writeln(" // positional      [67-80]");
-		f.write("\t"); foreach (i; 74 ..  81) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i; 81 ..  87) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure     [81-92]");
-		f.write("\t"); foreach (i; 87 ..  93) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i; 93 ..  97) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // R structure     [93-96]");
-		f.write("\t"); foreach (i; 97 ..  98) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [97]");
+		f.write("\t"); foreach (i; 49 ..  55) f.writef("%+7.4f, ", weight[i]); f.writeln("          // hanging/trapped [49-54]");
+		f.write("\t"); foreach (i; 55 ..  61) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [55-60]");
+		f.write("\t"); foreach (i; 61 ..  66) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [61-65]");
+		f.write("\t"); foreach (i; 66 ..  71) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [66-70]");
+		f.write("\t"); foreach (i; 71 ..  73) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [61-72]");
+		f.write("\t"); foreach (i; 73 ..  80) f.writef("%+7.4f, ", weight[i]); f.writeln(" // positional      [73-86]");
+		f.write("\t"); foreach (i; 80 ..  87) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i; 87 ..  94) f.writef("%+7.4f, ", weight[i]); f.writeln(" // P structure     [87-132]");
+		f.write("\t"); foreach (i; 94 .. 101) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;101 .. 108) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;108 .. 115) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;115 .. 122) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;122 .. 129) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;129 .. 133) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;133 .. 137) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // R structure     [133-136]");
+		f.write("\t"); foreach (i;137 .. 138) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [137]");
 		f.writeln("\t// Endgame");
-		f.write("\t"); foreach (i; 98 .. 105) f.writef("%+7.4f, ", weight[i]); f.writeln("// material        [98-104]");
-		f.write("\t"); foreach (i;105 .. 112) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe mobility   [105-111]");
-		f.write("\t"); foreach (i;112 .. 119) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe mobility [116-118]");
-		f.write("\t"); foreach (i;119 .. 126) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe attack     [119-125]");
-		f.write("\t"); foreach (i;126 .. 133) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe attack   [126-132]");
-		f.write("\t"); foreach (i;133 .. 140) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe defense    [133-139]");
-		f.write("\t"); foreach (i;140 .. 147) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe defense  [140-146]");
-		f.write("\t"); foreach (i;147 .. 153) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [147-152]");
-		f.write("\t"); foreach (i;153 .. 158) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [153-157]");
-		f.write("\t"); foreach (i;158 .. 163) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [158-162]");
-		f.write("\t"); foreach (i;163 .. 165) f.writef("%+7.4f, ", weight[i]); f.writeln("                                              // K shield/storm  [163-164]");
-		f.write("\t"); foreach (i;165 .. 170) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // positional      [165-169]");
-		f.write("\t"); foreach (i;170 .. 176) f.writef("%+7.4f, ", weight[i]); f.writeln("          // P structure     [170-181]");
-		f.write("\t"); foreach (i;176 .. 182) f.writef("%+7.4f, ", weight[i]); f.writeln("");
-		f.write("\t"); foreach (i;182 .. 186) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // R structure     [182-185]");
-		f.write("\t"); foreach (i;186 .. 187) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [186]");
+		f.write("\t"); foreach (i;138 .. 145) f.writef("%+7.4f, ", weight[i]); f.writeln("// material        [138-144]");
+		f.write("\t"); foreach (i;145 .. 152) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe mobility   [145-151]");
+		f.write("\t"); foreach (i;152 .. 159) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe mobility [152-158]");
+		f.write("\t"); foreach (i;159 .. 166) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe attack     [159-165]");
+		f.write("\t"); foreach (i;166 .. 173) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe attack   [166-172]");
+		f.write("\t"); foreach (i;173 .. 180) f.writef("%+7.4f, ", weight[i]); f.writeln(" // safe defense    [173-178]");
+		f.write("\t"); foreach (i;180 .. 187) f.writef("%+7.4f, ", weight[i]); f.writeln(" // unsafe defense  [180-186]");
+		f.write("\t"); foreach (i;187 .. 193) f.writef("%+7.4f, ", weight[i]); f.writeln("          // hanging/trapped [187-192]");
+		f.write("\t"); foreach (i;193 .. 199) f.writef("%+7.4f, ", weight[i]); f.writeln("          // Center control  [193-198]");
+		f.write("\t"); foreach (i;199 .. 204) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K attack        [199-203]");
+		f.write("\t"); foreach (i;204 .. 209) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // K defense       [204-208]");
+		f.write("\t"); foreach (i;209 .. 212) f.writef("%+7.4f, ", weight[i]); f.writeln("                                     // K shield/storm  [209-211]");
+		f.write("\t"); foreach (i;212 .. 217) f.writef("%+7.4f, ", weight[i]); f.writeln("                   // positional      [212-216]");
+		f.write("\t"); foreach (i;217 .. 224) f.writef("%+7.4f, ", weight[i]); f.writeln(" // P structure     [217-262]");
+		f.write("\t"); foreach (i;224 .. 231) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;231 .. 238) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;238 .. 245) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;245 .. 252) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;252 .. 259) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;259 .. 263) f.writef("%+7.4f, ", weight[i]); f.writeln("");
+		f.write("\t"); foreach (i;263 .. 267) f.writef("%+7.4f, ", weight[i]); f.writeln("                            // R structure     [263-266]");
+		f.write("\t"); foreach (i;267 .. 268) f.writef("%+7.4f, ", weight[i]); f.writeln("                                                       // tempo [267]");
 		f.writeln("];");
 		f.flush();
 	}
@@ -381,7 +402,6 @@ class Amoeba {
 		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
 		const double gr = (sqrt(5.0) - 1.0) / 2.0;
-		int iter;
 
 		v.set(weights, isTunable);
 
@@ -418,7 +438,6 @@ class Amoeba {
 		double a, b, c, d, fc, fd;
 		Vector v = Vector(countTunable());
 		const double gr = (sqrt(5.0) - 1.0) / 2.0; // Golden ration
-		int iter;
 
 		v.set(weights, isTunable);
 
@@ -452,8 +471,8 @@ class Amoeba {
 		v.get(weights, isTunable);
 	}
 
-	/* init the Simplex */
-	void init(const double volume) {
+	/* initialize the Simplex */
+	void start(const double volume) {
 		const size_t size = countTunable() + 1;
 		const double a = volume / size * sqrt(2.0);
 		const double δi = a * (sqrt(size - 1.0) + size - 1.0);
@@ -477,12 +496,12 @@ class Amoeba {
 	/* Amoeba or simplex optimization algorithm. */
 	void tune(const double tolerance, const int maxIter, const bool adaptative = false) 	{
 		Vector C, Pr, Pe, Pc;
-		double size, flat, υ, yBest = +double.max, yr, ye, yc;
+		double size, flat, yBest = +double.max, yr, ye, yc;
 		static immutable int minIter = 10;
 		const double tiny = tolerance * tolerance;
 		const double  ν = adaptative ? P.length - 1 : 2.0;
 		const double α = 1.0, β = 1.0 + 2.0 / ν, γ = 0.75 - 1.0 / (2.0 * ν), δ = 1.0 - 1.0 / ν;
-		enum Stage {init, reflection, expansion, contraction, reduction}
+		enum Stage {start, reflection, expansion, contraction, reduction}
 		Stage stage;
 
 		iter = 0;
@@ -541,11 +560,28 @@ class Amoeba {
 
 		// restore weights
 		P[best].get(weights, isTunable);
-
 	}
 
+	/* round all weights */
 	void roundWeights(const real unit) {
 		foreach(ref w; weights) w = rint(w / unit) * unit;
+	}
+
+	/* rescale all weights */
+	void roundWeights(const double scale) {
+		foreach(ref w; weights) w *= scale;
+	}
+
+	/* display a table of error for a variable */
+	void graph(int i, const double width, const double step = 0.01) {
+		Vector v = Vector(countTunable());
+		v.set(weights, isTunable);
+
+		const f = v[i] - width, t = v[i] + width;
+		writeln(i + 1, " error");
+		for (v[i] = f; v[i] <= t; v[i] += step) {
+			writeln(v[i], ", ", getError(v));
+		}
 	}
 }
 
@@ -555,7 +591,8 @@ void tune(Amoeba amoeba, const int [] openingRange, const int [] endgameRange, c
 	amoeba.setTunable(openingRange[0], openingRange[1]);
 	amoeba.setTunable(endgameRange[0], endgameRange[1]);
 
-	amoeba.init(size); amoeba.tune(tolerance, maxIter, adaptative);
+	amoeba.start(size);
+	amoeba.tune(tolerance, maxIter, adaptative);
 }
 
 
@@ -571,14 +608,20 @@ void tuneByPiece(Amoeba amoeba, const double volume, const double tolerance, con
 			pawn, pawn, knight, bishop, rook, queen, king,
 			pawn, pawn, knight, bishop, rook, queen, king, // defense
 			pawn, pawn, knight, bishop, rook, queen, king,
+			none, none, none,   none,   none, none,
 			pawn, knight, bishop, rook, queen, king,       // center control
 			pawn, knight, bishop, rook, queen,       // king
 			pawn, knight, bishop, rook, queen,
 			king, king,
 			pawn, pawn, knight, bishop, rook, rook, queen, // positional
 			king, pawn, knight, bishop, rook, queen, king,
-			pawn, pawn, pawn, pawn, pawn, pawn, // pawn structure
-			pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn, // pawn structure
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn,
 			rook, rook, rook, rook,             // rook structure
 			none,
 			// Endgame
@@ -589,44 +632,49 @@ void tuneByPiece(Amoeba amoeba, const double volume, const double tolerance, con
 			pawn, pawn, knight, bishop, rook, queen, king,
 			pawn, pawn, knight, bishop, rook, queen, king, // defense
 			pawn, pawn, knight, bishop, rook, queen, king,
+			none, none, none,   none,   none, none,
 			pawn, knight, bishop, rook, queen, king,       // center control
 			pawn, knight, bishop, rook, queen,       // king
 			pawn, knight, bishop, rook, queen,
-			king, king,
+			king, king, king,
 			pawn, knight, bishop, queen, king, // positional
-			pawn, pawn, pawn, pawn, pawn, pawn, // pawn structure
-			pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn, // pawn structure
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn, pawn, pawn, pawn,
+			pawn, pawn, pawn, pawn,
 			rook, rook, rook, rook,             // rook structure
 			none,
 		];
 
-		debug claim(pieces.length == amoeba.isTunable.length);
-		debug claim(pieces.length == amoeba.weights.length);
 		writeln("size: ", volume, "; tolerance: ", tolerance, "; maxIter: ", maxIter, "; adaptative: ", adaptative);
 
 		foreach (p; none .. size) {
 			amoeba.clearTunable(0, amoeba.isTunable.length);
 			writeln(p);
 			foreach (i; 0 .. pieces.length) if (p == pieces[i]) amoeba.setTunable(i);
-			amoeba.init(volume); amoeba.tune(tolerance, maxIter, adaptative);
+			amoeba.start(volume); amoeba.tune(tolerance, maxIter, adaptative);
 		}
 	}
 }
 
+
 /* tune the evaluation function weights */
 void main(string [] args) {
 	int [] range;
-	int maxIter = 10000, nCpu = 1;
+	int maxIter = 10_000, nCpu = 1, graph = 0;
 	double size = 0.1, tolerance = 0.001, round = 0.00001;
 	string weightFile, gameFile;
-	bool fromScratch, byConcept, byPiece, optimizeK, adaptative, help, bench, individualy, stats;
+	bool fromScratch, byConcept, byPiece, optimizeK, adaptative, help, bench, individualy, stats, useLL, useAbs;
 
 	getopt(args, "iter|i", &maxIter , "size|s", &size, "tolerance|t", &tolerance, "range|r", &range, "stats", &stats,
 		"weight|w", &weightFile, "game|g", &gameFile, "cpu|n", &nCpu, "scratch|z", &fromScratch, "concept|c", &byConcept,
 		"piece|p", &byPiece, "optimizeK|k", &optimizeK, "adaptative|d", &adaptative, "bench|b", &bench, "optimize|o", &individualy,
-		"round", &round, "help|h", &help);
+		"likelihood|l", &useLL, "absolute|a", &useAbs, "graph", &graph, "round", &round, "help|h", &help);
 	if (help) {
-		writeln("tune [--iter|-i <integer>] [--size|-s <real>] [--tolerance|-t <real>] [--weight|-w <file>] [--game|-g <file>] [--range|-r <integer>/--scracth|-z/--all|-a/--piece|-p] [--adaptative|-d] [--help|-h]");
+		writeln("tune [options]");
 		writeln("\t--iter|-i <integer>   Set the maximal number of iteration");
 		writeln("\t--size|-s <real>      Set the size of the simplex");
 		writeln("\t--tolerance|-t <real> Set the accuracy of the solution");
@@ -640,6 +688,8 @@ void main(string [] args) {
 		writeln("\t--piece|-p            compute the set of weights by pieces (pawn, knight, ...)");
 		writeln("\t--optimizeK|-k        compute the optimal value for k");
 		writeln("\t--optimize|-o         compute the set of weights using golden ratio");
+		writeln("\t--likelihood|-l       optimize the log-likelihood of the game outcome (instead of least square error)");
+		writeln("\t--absolute            optimize the least absolute error of the game outcome (instead of least square error)");
 		writeln("\t--bench|-b            bench");
 		writeln("\t--round <unit>        quantize the weights to unit, f.ex '--round 0.01' rounds the weights to centipawns");
 		writeln("\t--stats               compute some statistics about current weights");
@@ -651,8 +701,18 @@ void main(string [] args) {
 
 	Amoeba amoeba = new Amoeba(weight.initialWeights, gameFile, nCpu);
 
+	if (useAbs && useLL) {
+		writeln("likelihood or least absolute error ? Please use a single method");
+		return;
+	} else if (useAbs) amoeba.errorType = ErrorType.absolute;
+	else if (useLL) amoeba.errorType = ErrorType.logLikelihood;
+
 	if (stats) {
 		amoeba.stats();
+	}
+
+	else if (graph) {
+		amoeba.graph(graph - 1, 2.0, 0.01);
 	}
 
 	// bench: just optimize K (to test/debug parallelism, ...)
@@ -663,7 +723,7 @@ void main(string [] args) {
 	// determine weights from scratch
 	else if (fromScratch) {
 		amoeba.weights[] = 0;
-		amoeba.weights[0..5] = amoeba.weights[98..103] = [1, 3, 3, 5, 9];
+		amoeba.weights[0..5] = amoeba.weights[138..143] = [1, 3, 3, 5, 9];
 	}
 
 	// tune weight sets as material, positional, mobility, pawn structures & tempo concepts.
@@ -671,33 +731,35 @@ void main(string [] args) {
 		if (optimizeK) amoeba.optimizeK(0.0000001, 100);
 		// material
 		writeln("Tuning material");
-	 	tune(amoeba, [1, 7], [98, 105], size, tolerance, maxIter, adaptative);
+	 	tune(amoeba, [1, 7], [138, 145], size, tolerance, maxIter, adaptative);
 		// positional
 		writeln("Tuning positional");
-	 	tune(amoeba, [67, 81], [165, 171], size, tolerance, maxIter, adaptative);
+	 	tune(amoeba, [73, 87], [212, 217], size, tolerance, maxIter, adaptative);
 		// mobility
 		writeln("Tuning mobility");
-		tune(amoeba, [7, 21], [105, 119], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [7, 21], [145, 159], size, tolerance, maxIter, adaptative);
 		writeln("Tuning attack");
-		tune(amoeba, [21, 35], [119, 133], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [21, 35], [159, 173], size, tolerance, maxIter, adaptative);
 		writeln("Tuning defense");
-		tune(amoeba, [35, 49], [133, 147], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [35, 49], [173, 187], size, tolerance, maxIter, adaptative);
+		writeln("Hanging/trapped/enclosed");
+		tune(amoeba, [49, 54], [187, 193], size, tolerance, maxIter, adaptative);
 		writeln("Center control");
-		tune(amoeba, [49, 55], [147, 153], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [55, 61], [193, 199], size, tolerance, maxIter, adaptative);
 		// king
 		writeln("Tuning King attack");
-		tune(amoeba, [55, 60], [153, 158], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [61, 66], [199, 204], size, tolerance, maxIter, adaptative);
 		writeln("Tuning King defense"); // +king shield/storm
-		tune(amoeba, [60, 66], [158, 170], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [66, 73], [204, 212], size, tolerance, maxIter, adaptative);
 		// pawn structure
 		writeln("Tuning pawn structure");
-		tune(amoeba, [81, 92], [170, 182], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [87, 133], [217, 259], size, tolerance, maxIter, adaptative);
 		// rook structure
 		writeln("Tuning rook structure");
-		tune(amoeba, [93, 97], [182, 186], size, tolerance, maxIter, adaptative);
+		tune(amoeba, [133,137], [259, 267], size, tolerance, maxIter, adaptative);
 		// tempo
 		writeln("Tuning tempo");
-	 	tune(amoeba, [97, 98], [186, 187], size, tolerance, maxIter, adaptative);
+	 	tune(amoeba, [137, 138], [267, 268], size, tolerance, maxIter, adaptative);
 
 	// tune weight sets by piece involved.
 	} else if (byPiece) {
@@ -723,7 +785,7 @@ void main(string [] args) {
 		amoeba.clearTunable(0, 1);      // pawn opening material = 1 pawn by definition.
 
 		if (optimizeK) amoeba.optimizeK(0.0000001, 100);
-		amoeba.init(size);
+		amoeba.start(size);
 		amoeba.tune(tolerance, maxIter, adaptative);
 	}
 
