@@ -14,13 +14,13 @@ else version (GNU) import gcc.builtins;
 
 /* limits */
 struct Limits {
-	enum ply {max = 100};
-	enum game {size = 4096};
-	enum move {size = 4096, mask = 4095};
-	enum moves {size = 256};
+	enum ply {max = 127}
+	enum game {size = 4_096}
+	enum move {size = 4_096, mask = 4_095}
+	enum moves {size = 256}
 }
 
-enum Score {mate = 30000, low = -29000, high = 29000, big = 3000}
+enum Score {mate = 30_000, low = -29_000, high = 29_000, big = 3_000}
 
 /*
  * bit utilities
@@ -67,25 +67,6 @@ version (withPopCount) {
 		return  cast (int) (c >> 56);
 	}
 }
-
-/* Print bits */
-void writeBitboard(const ulong b, File f = stdout) {
-	int i, j, x;
-	const char[2] bit = ".X";
-	const char[8] file = "12345678";
-
-	f.writeln("  a b c d e f g h");
-	for (i = 7; i >= 0; --i) {
-		f.write(file[i], " ");
-		for (j = 0; j < 8; ++j) {
-			x = i * 8 + j;
-			f.write(bit[((b >> x) & 1)], " ");
-		}
-		f.writeln(file[i], " ");
-	}
-	f.writeln("  a b c d e f g h");
-}
-
 
 /*
  * prefetch
@@ -266,11 +247,16 @@ public:
  */
 
 /* a replacement for assert that is more practical for debugging */
-void claim(bool allegation, string file = __FILE__, const int line = __LINE__) {
+void claim(bool allegation, string file = __FILE__, const int line = __LINE__, const string msg = ": Assertion failed.") {
 	if (!allegation) {
-		stderr.writeln(file, ":", line, ": Assertion failed.");
+		stderr.writeln(file, ":", line, msg);
 		abort();
 	}
+}
+
+/* unreachable */
+void unreachable(string file = __FILE__, const int line = __LINE__) {
+	claim(0, file, line, "Unreachable code");
 }
 
 /* find a substring between two strings */
@@ -287,27 +273,5 @@ string findBetween(string s, string start, string end) {
 /* check if a File is writeable/readable */
 bool isOK(const std.stdio.File f) @property {
 	return f.isOpen && !f.eof && !f.error;
-}
-
-
-/*
- * Unit test
- */
-unittest {
-	claim(stdout.isOK);
-	writeBitboard(0x55aa55aa55aa55aa);
-	write("Testing utilities..."); stdout.flush();
-	claim(swapBytes(0x1122334455667788) == 0x8877665544332211);
-	claim(hasSingleBit(128));
-	claim(!hasSingleBit(42));
-	claim(firstBit(42) == 1);
-	ulong b = 42;
-	claim(popBit(b) == 1);
-	claim(popBit(b) == 3);
-	claim(popBit(b) == 5);
-	claim(b == 0);
-	claim(countBits(42) == 3);
-	claim(findBetween("bm Qg6 Rh3;", "bm", ";") == " Qg6 Rh3");
-	writeln("ok");
 }
 
