@@ -43,14 +43,16 @@ endif
 
 #lcd2
 ifeq ($(DC),ldc2)
-	DFLAGS =  -singleobj -w -dw -mcpu=$(CPU)
+	DFLAGS = -singleobj -w -dw -mcpu=$(CPU)
 	ifeq ($(BUILD),fast)
-		DFLAGS += -O3 -release -boundscheck=off -flto=full -enable-cross-module-inlining
+		DFLAGS += -O -release -boundscheck=off -flto=full
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -O0 -g -gc
+	else ifeq ($(BUILD),cov)
+		DFLAGS = -O -release -boundscheck=off -flto=full -cov
 	endif
 	ifeq ($(POPCOUNT),true)
-		DFLAGS += -d-version=withPopCount -mattr=popcnt
+		DFLAGS += -d-version=withPopCount -mattr=+sse4.2,+popcnt
 	endif
 	ifeq ($(GAME),true)
 		DFLAGS += -d-version=withGameSupport
@@ -107,7 +109,7 @@ build :
 build-pgo :
 	$(MAKE) clean
 	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) < bench.uci
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) < bench.uci > /dev/null
 	$(PGO_MERGE)
 	$(DC) $(DFLAGS) $(PGO_USE) $(SRC)
 
