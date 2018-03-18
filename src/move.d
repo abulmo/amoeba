@@ -1,7 +1,7 @@
 /*
  * File move.d
  * move, list of moves & sequence of moves.
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module move;
@@ -53,7 +53,7 @@ Move fromPan(string s) {
 
 version (withGameSupport) {
 	/* convert a string using standard algebraic notation (SAN) into a move */
-	Move fromSan(string s, Board b) {
+	Move fromSan(string s, const Board b) {
 		int i, r = -1, f = -1;
 		Square from, to;
 		Piece promotion = Piece.none;
@@ -137,7 +137,7 @@ version (withGameSupport) {
 			if ((p == Piece.pawn && file(move.from) != file(move.to)) || nSameTo > nSameFile) s ~= f[file(move.from)];
 			if (nSameFile) s ~= r[rank(move.from)];
 			if ((p == Piece.pawn && file(move.from) != file(move.to)) || board[move.to]) s ~= 'x';
-			s ~= format("%s", move.to);
+			s ~= f[file(move.to)]; s ~= r[rank(move.to)];
 			if (move.promotion) s ~= "=" ~ toChar(move.promotion);
 		}
 
@@ -303,7 +303,8 @@ private:
 			else if (i.move == ttMove[1]) i.value = ttBonus - 1;
 			else {
 				auto p = toPiece(board[i.move.from]);
-				auto victim = toPiece(board[i.move.to]);						if (victim || i.move.promotion) {
+				auto victim = toPiece(board[i.move.to]);
+				if (victim || i.move.promotion) {
 					i.value = cast (short) (vCapture[victim] + vPromotion[i.move.promotion] - vPiece[p]);
 					if (board.see(i.move) < 0 && board.giveCheck(i.move) < 2) i.value += badSeeMalus;
 				} else {
@@ -333,6 +334,7 @@ public:
 		captureOnly = false;
 		index = n = 0;
 	}
+
 	/* init (from quiescence search) */
 	void setup(const bool inCheck, const ref Move [2] ttm) {
 		ttMove = ttm;
@@ -358,7 +360,8 @@ public:
 			if (board.isLegal(ttMove[1])) {
 				push(ttMove[1], ttBonus - 1);
 				break;
-			} else goto case;			// capture & promotion generation & scoring
+			} else goto case;
+		// capture & promotion generation & scoring
 		case Stage.captureGeneration:
 			stage = captureOnly ? Stage.moveSelection :  Stage.captureSelection;
 			generateCapture(board);
@@ -366,15 +369,18 @@ public:
 
 		// good-capture selection from best to worst
 		case Stage.captureSelection:
-			if (index == n || item[index].value < 0) { // end of good capture							stage = Stage.killer1;
+			if (index == n || item[index].value < 0) { // end of good capture
+				stage = Stage.killer1;
 				goto case;
-			} else {							foreach (i; index .. n) {
+			} else {
+				foreach (i; index .. n) {
 					if (board.see(item[i].move) >= 0 || board.giveCheck(item[i].move) == 2) {
 						insert(index, i);
 						break;
 					} else if (item[i].value >= 0) item[i].value += badSeeMalus;
 				}
-				if (item[index].value < 0) { // end of good capture								stage = Stage.killer1;
+				if (item[index].value < 0) { // end of good capture
+					stage = Stage.killer1;
 					goto case;
 				} else 	break;
 			}
@@ -514,9 +520,10 @@ public:
 	}
 
 	/* opIndex */
-	ref const(Move) opIndex(const size_t i) const {
+	Move opIndex(const size_t i) const {
 		 return item[i].move;
-	}}
+	}
+}
 
 
 /*
