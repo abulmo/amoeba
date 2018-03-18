@@ -1,7 +1,7 @@
 /*
  * File search.d
  * Best move search.
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module search;
@@ -73,7 +73,7 @@ struct Entry {
  */
 final class TranspositionTable {
 	ulong nUsed;
-	enum size_t bucketSize = 4;
+	enum size_t bucketSize = 3;
 	Entry [] entry;
 	size_t mask;
 	ubyte date;
@@ -421,7 +421,7 @@ private:
 		moves.setup(board.inCheck, h.move);
 
 		while ((m = moves.selectMove(board).move) != 0) {
-			if (board.see(m) < 0) continue;
+			if (!board.inCheck && board.see(m) < 0) continue;
 			s = eval(board, m) + v + δ;
 			if (s > α || isPv || board.inCheck || board.giveCheck(m)) {
 				update(m);
@@ -484,9 +484,9 @@ private:
 		bool isSafe = !(isPv || board.inCheck || α >= Score.big || β <= -Score.big);
 		if (doPrune && isSafe) {
 			// pruning
-			const  δ = margin(d);
-			const sα = α - δ;
-			const sβ = β + δ;
+			const int  δ = margin(d);
+			const int sα = α - δ;
+			const int sβ = β + δ;
 
 			// eval pruning (our position is very good, no need to search further)
 			if (v >= sβ) return β;
@@ -501,7 +501,7 @@ private:
 				restore(0);
 				if (!stop && s >= β) {
 					if (s >= Score.high) s = β;
-					if (d < 12 ||  (s = αβ(β - 1, β, d - r, false)) >= β) {
+					if (d < 10 ||  (s = αβ(β - 1, β, d - r, false)) >= β) {
 						tt.store(board.key, d, Bound.lower, toHash(s), toHash(v), h.move[0]);
 						return s;
 					}
@@ -516,14 +516,14 @@ private:
 			if (d > r) {
 				s = αβ(α, β, d - r, false);
 				tt.probe(board.key, h);
-				isSafe &= (-Score.big < s && s < Score.big);
+				isSafe = isSafe && (-Score.big < s && s < Score.big);
 			}
 		}
 
 		// prepare move generation
 		moves.setup(board.inCheck, h.move, killer[ply], refutation[line.top & Limits.move.mask], history);
 
-		const αOld = α;
+		const int αOld = α;
 
 		// generate moves in order & loop through them
 		while ((m = (i = moves.selectMove(board)).move) != 0) {
@@ -591,7 +591,7 @@ private:
 		// loop thru all moves (and order them)
 		for (int i = iPv; i < rootMoves.length; ++i) {
 			Move m = rootMoves[i];
-			const bool isTactical = rootMoves.item[i].value > 0 || board.isTactical(m) || board.giveCheck(m) || board.inCheck;
+			const bool isTactical = (rootMoves.item[i].value > 0 || board.isTactical(m) || board.giveCheck(m) || board.inCheck);
 			// check extension (if move is not losing)
 			e = (board.giveCheck(m) && board.see(m) >= 0);
 
