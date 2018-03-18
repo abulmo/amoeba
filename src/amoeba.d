@@ -1,6 +1,6 @@
 /*
  * main function
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module amoeba;
