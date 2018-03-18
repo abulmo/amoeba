@@ -1,7 +1,7 @@
 /*
  * file kpk.d
  * KPK base
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module kpk;
