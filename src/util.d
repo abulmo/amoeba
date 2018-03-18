@@ -2,7 +2,7 @@
  * File util.d
  * Fast implementation on X86_64, portable algorithm for other platform
  * of some bit functions.
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module util;
@@ -41,7 +41,8 @@ else version (GDC) alias firstBit = __builtin_ctz;
 else alias firstBit = bsf;
 
 /* Get the last bit set */
-version (GDC) alias firstBit = __builtin_clz;
+version (LDC) int lastBit(ulong b) {return cast (int) llvm_ctlz(b, true);}
+version (GDC) alias lastBit = __builtin_clz;
 else alias lastBit = bsr;
 
 /* Extract a bit */
