@@ -2,7 +2,7 @@
  * File tourney.d
  * Organise a match beween two programs using UCI protocol
  * Play it until one program is found stronger than the other using the sprt approach.
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 import util, board, move, game;
@@ -330,7 +330,7 @@ public:
 }
 
 /*
- * A pool of engines running const parallel...
+ * A pool of engines running in parallel...
  */
 class EnginePool {
 private:
@@ -381,7 +381,7 @@ public:
 		Board b = new Board;
 		Random r;
 
-		openings = new shared GameBase;	
+		openings = new shared GameBase;
 		r.seed(unpredictableSeed);
 		foreach (o; 0 .. nOpenings) {
 			shared Game game = new shared Game;
@@ -442,7 +442,7 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 
 	r.seed(unpredictableSeed);
 
-	f.open("simulation.txt", "w");	
+	f.open("simulation.txt", "w");
 
 	for (double elo = -20; elo <= 20; elo += 0.1)  {
 		const double a = 0.005 * whiteAdvantage, d = 0.01 * draw;
@@ -458,7 +458,7 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 		B[0] = max(0, min(1, w - a));
 		B[1] = min(1 - B[0], d);
 		B[2] = 1 - B[0] - B[1];
-	
+
 		foreach (i; 0 .. nSimulation) {
 
 			SPRT sprt = SPRT(H0,  H1, α, β);
@@ -473,7 +473,7 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 				sprt.record(s);
 				if ((result = sprt.stop(v)) != 0) break;
 			}
-	
+
 			++outcome[result + 1];
 		}
 
@@ -496,20 +496,21 @@ void main(string [] args) {
 	EnginePool engines;
 	double time = 0.1;
 	int nGames = 30_000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64;
-	bool showVersion, showHelp, showDebug;
+	bool showVersion, showHelp, showDebug, elo;
 	string [] engineName, openingFile;
 	string outputFile, var;
-	double H0 = -2.0, H1 = 2.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0;
+	double H0 = -2.0, H1 = 2.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0, win = 0.0, loss = 0.0;
 	Var v;
 
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time, "hash", &hashSize,
 		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
-		"simulation|s", &nSimulation, "draw", &draw, "white", &white,
+		"simulation|s", &nSimulation, "draw|d", &draw, "white", &white,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
-		"debug|d", &showDebug, "help|h", &showHelp, "version", &showVersion);
+		"elo", &elo, "win|w", &win, "loss|l", &loss,
+		"debug", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.5\n© 2017 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.6\n© 2017-2018 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
@@ -528,8 +529,12 @@ void main(string [] args) {
 		writeln("    --beta  <beta>           type II error (default = 0.05)");
 		writeln("    --variance|-v <type>     none|3nomial|5nomial|all (default=all) ");
 		writeln("    --simulation|s <n>       run <n> simulations (default: 0)");
-		writeln("    --draw  <%draw>          draw percentage to use during a simulation (0 to 100: default 40)");
-		writeln("    --white  <%draw>         white advantage to use during a simulation (0 to 30: default 10)");
+		writeln("        --draw|-d <%draw>        draw percentage to use during a simulation (0 to 100: default 40)");
+		writeln("        --white  <%draw>         white advantage to use during a simulation (0 to 30: default 10)");
+		writeln("    --elo                    compute elo");
+		writeln("        --win|-w <n>             number of win ");
+		writeln("        --draw|-d <n>            number of draw ");
+		writeln("        --loss|-l <n>            number of loss ");
 		writeln("    --debug                  allow debugging by the engine to a log file");
 		writeln("    --help|-h                display this help");
 		writeln("    --version                show version number");
@@ -545,7 +550,7 @@ void main(string [] args) {
 		writeln("test accepted");
 	}
 
-	if (nSimulation == 0 && engineName.length != 2) {
+	if (nSimulation == 0 && !elo  && engineName.length != 2) {
 		if (!showVersion && !showHelp) stderr.writeln("Two engines and only two needed");
 		return;
 	}
@@ -561,6 +566,13 @@ void main(string [] args) {
 		white = max(0, min(30, white));
 		draw = max(0, min(100, draw));
 		simulation(nSimulation, nGames, draw, white, H0,  H1, α, β, v);
+
+	} else if (elo) {
+		SPRT sprt = SPRT(H0, H1, α, β);
+		sprt.w = cast (ulong) win;
+		sprt.d = cast (ulong) draw;
+		sprt.l = cast (ulong) loss;
+		sprt.LLR(sprt.var3());
 
 	// run a tournament between 2 engines
 	} else {
