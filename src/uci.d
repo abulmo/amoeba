@@ -1,7 +1,7 @@
 /*
  * File uci.d
  * Universal Chess Interface.
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module uci;
@@ -10,7 +10,7 @@ import board, eval, move, search, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
 
 /* version */
-enum string versionNumber = "2.7";
+enum string versionNumber = "2.8";
 
 /* Some information about the compilation */
 string arch() @property {
