@@ -1,7 +1,7 @@
 /*
  * File game.d
  * PGN game reader / writer
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 import board, move, util;
@@ -108,7 +108,7 @@ public:
 /*
  * Game
  */
-shared class Game {
+final shared class Game {
 	struct Info {
 		float time = 0.0;
 		short score = 0;
@@ -389,7 +389,7 @@ public:
 /*
  * GameBase a collection of Game.
  */
-shared class GameBase {
+final shared class GameBase {
 	Game [] games;
 	size_t index;
 	class Lock {}
