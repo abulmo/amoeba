@@ -1,7 +1,7 @@
 /*
  * File board.d
  * Chess board representation, move generation, etc.
- * © 2016-2017 Richard Delorme
+ * © 2016-2018 Richard Delorme
  */
 
 module board;
@@ -388,6 +388,7 @@ public:
 	int ply, plyOffset;
 
 	static immutable Mask [Square.size] mask;
+	enum { whiteSquares = 0xaa55aa55aa55aa55, blackSquares = 0x55aa55aa55aa55aa }
 private:
 	static immutable bool [Limits.move.size][Piece.size] legal;
 	static immutable ubyte [512] ranks;
@@ -589,15 +590,17 @@ private:
 	}
 
 	/* check if a square is attacked */
-	bool isSquareAttacked(const Square x, const Color player) const {
-		const ulong occupancy = ~piece[Piece.none];
-		const ulong P = color[player];
-
+	bool isSquareAttacked(const Square x, const Color player, const ulong P, const ulong occupancy) const {
 		return attack(Piece.bishop, x, P & (piece[Piece.bishop] | piece[Piece.queen]), occupancy)
 			|| attack(Piece.rook, x, P & (piece[Piece.rook] | piece[Piece.queen]), occupancy)
 			|| attack(Piece.knight, x, P & piece[Piece.knight])
 			|| attack(Piece.pawn, x, P & piece[Piece.pawn], occupancy, opponent(player))
 			|| attack(Piece.king, x, P & piece[Piece.king]);
+	}
+
+	/* check if a square is attacked */
+	bool isSquareAttacked(const Square x, const Color player) const {
+		return isSquareAttacked(x, player, color[player], ~piece[Piece.none]);
 	}
 
 	/* generate all moves from a square */
@@ -847,7 +850,8 @@ public:
 		for (f = 0; f <= 7; ++f) {
 			x = toSquare(f, r);
 			if (f == 0) s ~= format("%1d ", r + 1);
-			s ~= p[cpiece[x]] ~ " ";
+			s ~= p[cpiece[x]];
+			s ~= " ";
 			if (f == 7) s ~= format("%1d\n", r + 1);
 		}
 		s ~= "  a b c d e f g h\n";
@@ -1029,8 +1033,6 @@ public:
 			if (nMinor <= 1) return Result.insufficientMaterialDraw;
 			// only bishops on same square color: KBBK
 			const diff = abs(countBits(color[Color.white]) - countBits(color[Color.black]));
-			const blackSquares = 0x55aa55aa55aa55aa;
-			const whiteSquares = ~blackSquares;
 			if (diff == nMinor && piece[Piece.knight] == 0
 				&& ((piece[Piece.bishop] & blackSquares) == piece[Piece.bishop] || (piece[Piece.bishop] & whiteSquares) == piece[Piece.bishop])) return Result.insufficientMaterialDraw;
 		}
@@ -1218,13 +1220,12 @@ public:
 		Square from, to, x;
 
 		// king evades
-		piece[Piece.none] ^= mask[k].bit;
+		o = occupancy ^ mask[k].bit;
 		target = attack(Piece.king, k, ~color[player]);
 		while (target) {
 			to = popSquare(target);
-			if (!isSquareAttacked(to, enemy)) moves.push(k, to);
+			if (!isSquareAttacked(to, enemy, color[enemy], o)) moves.push(k, to);
 		}
-		piece[Piece.none] ^= mask[k].bit;
 
 		// capture or bloc the (single) checker;
 		if (hasSingleBit(checkers)) {
@@ -1322,8 +1323,8 @@ public:
 		// pawn (pins)
 		attacker = piece[Piece.pawn] & stack[ply].pins;
 		while (attacker) {
-			const int pawnLeft = push[player] - 1;
-			const int pawnRight = push[player] + 1;
+			const int pawnLeft = pawnPush - 1;
+			const int pawnRight = pawnPush + 1;
 			from = popSquare(attacker);
 			d = mask[k].direction[from];
 			if (type != Generate.quiet && d == abs(pawnLeft)) {
@@ -1400,40 +1401,31 @@ public:
 		}
 	}
 
+
 	/* does a move put its own king in check */
-	bool checkOwnKing (const Move move) {
+	bool checkOwnKing(const Move move) const {
 		const Piece p = toPiece(cpiece[move.from]);
 		const Color enemy = opponent(player);
 		const CPiece victim = cpiece[move.to];
-		bool inCheck;
+		ulong E = color[enemy], O = ~piece[Piece.none];
 
 		// king in check after the move ?
-		piece[Piece.none] ^= mask[move.to].bit | mask[move.from].bit;
+		O ^= mask[move.to].bit | mask[move.from].bit;
 		if (victim) {
-			color[enemy] ^= mask[move.to].bit;
-			piece[Piece.none] ^= mask[move.to].bit;
+			E ^= mask[move.to].bit;
+			O ^= mask[move.to].bit;
 		} else if (p == Piece.pawn && move.to == stack[ply].enpassant) {
 			const x = toSquare(file(move.to), rank(move.from));
-			color[enemy] ^= mask[x].bit;
-			piece[Piece.none] ^= mask[x].bit;
+			E ^= mask[x].bit;
+			O ^= mask[x].bit;
 		}
 		Square k = (p == Piece.king ? move.to : xKing[player]);
-		inCheck = isSquareAttacked(k, enemy);
-		if (victim) {
-			color[enemy] ^= mask[move.to].bit;
-			piece[Piece.none] ^= mask[move.to].bit;
-		} else if (p == Piece.pawn && move.to == stack[ply].enpassant) {
-			const x = toSquare(file(move.to), rank(move.from));
-			color[enemy] ^= mask[x].bit;
-			piece[Piece.none] ^= mask[x].bit;
-		}
-		piece[Piece.none] ^= mask[move.to].bit | mask[move.from].bit;
 
-		return inCheck;
+		return isSquareAttacked(k, enemy, E, O);
 	}
 	
 	/* is a move legal */
-	bool isLegal(const Move move) {
+	bool isLegal(const Move move) const {
 		const ulong occupancy = ~piece[Piece.none];
 		Piece p = toPiece(cpiece[move.from]);
 		Color enemy = opponent(player);
@@ -1486,7 +1478,7 @@ public:
 	}
 
 	/* guess a move from SAN information */
-	version (withGameSupport) Move guess(const Piece p, const Square to, const int f, const int r, const Piece promotion, const bool capture) {
+	version (withGameSupport) Move guess(const Piece p, const Square to, const int f, const int r, const Piece promotion, const bool capture) const {
 		const CPiece cp = toCPiece(p, player);
 		Square from;
 		const int [2] push = [8, -8];
