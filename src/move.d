@@ -1,7 +1,7 @@
 /*
  * File move.d
  * move, list of moves & sequence of moves.
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 module move;
@@ -156,7 +156,9 @@ version (withGameSupport) {
  */
 struct History {
 	ushort [Square.size][CPiece.size] goodMoves, badMoves;
-	enum short max = 16_384;
+	enum int max = 16_384;
+
+	/* rescale history */
 	void rescale(const int d = 2) {
 		foreach (p; CPiece.wpawn .. CPiece.size)
 		foreach (x; Square.a1 .. Square.size) {
@@ -165,14 +167,17 @@ struct History {
 		}
 	}
 
+	/* update history for a good move */
 	void updateGood(const Board board, const Move m, const uint δ) {
 		if ((goodMoves[board[m.from]][m.to] += δ) > max) rescale();
 	}
 
+	/* update history for bad moves */
 	void updateBad(const Board board, const Move m, const uint δ) {
 		if ((badMoves[board[m.from]][m.to] += δ) > max) rescale();
 	}
 
+	/* clear the history tables */
 	void clear() {
 		foreach (p; CPiece.wpawn .. CPiece.size)
 		foreach (x; Square.a1 .. Square.size) {
@@ -180,11 +185,13 @@ struct History {
 		}
 	}
 
+	/* return the history score */
 	short value(const CPiece p, const Square to) const {
 		const int g = goodMoves[p][to], b = badMoves[p][to];
 		if (g + b == 0) return cast (short) -max / 2;
-		else return cast (short) ((goodMoves[p][to] * max) / (goodMoves[p][to] + badMoves[p][to]) - max);
+		else return cast (short) ((g * max) / (g + b) - max);
 	}
+
 }
 
 /*
@@ -269,7 +276,8 @@ private:
 			else if (m == ttMove[1]) i.value = doublon;
 			else {
 				auto p = toPiece(board[m.from]);
-				auto victim = toPiece(board[m.to]);						i.value = cast (short) (vCapture[victim] + vPromotion[m.promotion] - vPiece[p]);
+				auto victim = toPiece(board[m.to]);
+				i.value = cast (short) (vCapture[victim] + vPromotion[m.promotion] - vPiece[p]);
 				if (i.value == -vPiece[Piece.pawn]) {
 					if (board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
 					else i.value = to7thRankBonus; // push to 7
@@ -344,7 +352,7 @@ public:
 	}
 
 	/* staged - move generation (aka spaghetti code) */
-	ref MoveItem selectMove(Board board) {
+	ref MoveItem selectMove(Board board) return {
 		final switch (stage) {
 		// best move from transposition table
 		case Stage.ttMove1:
@@ -451,11 +459,11 @@ public:
 	}
 
 	/* get front move */
-	ref const(Move) front() const {
+	Move front() const {
 		return item[index].move;
 	}
 
-	/* pop first move */
+	/* popFront */
 	void popFront() {
 		++index;
 	}
@@ -511,7 +519,6 @@ public:
 		f.writeln("stage = ", stage, " index = ", index, " n = ", n);
 		f.writeln("ttMove = ", ttMove[0].toPan, ", ", ttMove[1].toPan);
 		f.writeln("killer = ", killer[0].toPan, ", ", killer[1].toPan, " ; refutation = ", refutation.toPan);
-
 	}
 
 	/* is the first move ? */
@@ -522,6 +529,15 @@ public:
 	/* opIndex */
 	Move opIndex(const size_t i) const {
 		 return item[i].move;
+	}
+
+	/* exclude a move */
+	void exclude(Move m) {
+		foreach (i; 0 .. n) if (m == item[i].move) {
+			foreach (j; i + 1 .. n) item[j - 1] = item[j];
+			--n;
+			break;
+		}
 	}
 }
 
@@ -574,6 +590,21 @@ struct Line {
 		foreach (m; move[0 .. n]) s ~= m.toPan() ~ " ";
 		return s;
 	}
+
+	/* Convert it to a string */
+	version (withGameSupport) string toSan(Board board) const {
+		string s;
+		if (board.player == Color.black) s = format("%d... ", (board.ply + board.plyOffset) / 2 + 1);
+		foreach (m; move[0 .. n]) {
+			if (board.player == Color.white) s ~= format("%d.", (board.ply + board.plyOffset) / 2 + 1);
+			s ~= m.toSan(board) ~ " ";
+			board.update(m);
+		}
+		foreach_reverse (m; move[0 .. n]) board.restore(m);
+
+		return s;
+	}
+
 
 	/* last pushed move */
 	Move top() const @property {
