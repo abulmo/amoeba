@@ -1,7 +1,7 @@
 /*
  * File game.d
  * PGN game reader / writer
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 import board, move, util;
@@ -350,7 +350,7 @@ public:
 		foreach (t; tags) {
 			t.write(f);
 			if (t.name == "FEN") board.set(t.value);
-			else if (t.name == "Result" && t.value == result.fromResult!false()) hasResult = true;
+			else if (t.name == "Result" && t.value == result.fromResult!(LongFormat.off)()) hasResult = true;
 		}
 
 		// game
@@ -368,9 +368,9 @@ public:
 		}
 		if (!hasResult) {
 			result = board.isGameOver;
-			f.writeln("[Result \"", result.fromResult!false(), "\"]");
+			f.writeln("[Result \"", result.fromResult!(LongFormat.off)(), "\"]");
 		}
-		text ~= result.fromResult!true() ~ " ";
+		text ~= result.fromResult!(LongFormat.on)() ~ " ";
 
 		foreach (i; 0 .. text.length) {
 			if (text[i].isSpace()) {
@@ -468,13 +468,16 @@ final shared class GameBase {
 	}
 
 	/* get next game */
-	shared(Game) next(const bool loop = false) {
+	shared(Game) next(const Loop loop = Loop.off) {
 		synchronized (lock) {
-			if (index < games.length) atomicOp!"+="(index, 1);
-			else {
-				if (loop) index = 1; else return null;
+			if (index == games.length) {
+				if (loop == Loop.on) index = 0; else return null;
 			}
-			return games[index - 1];
+			size_t i = index;
+
+			atomicOp!"+="(index, 1);
+
+			return games[i];
 		}
 	}
 }
