@@ -1,6 +1,6 @@
 /*
  * Tune the evaluation function
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 module tune;
@@ -8,6 +8,11 @@ import board, eval, game, move, search, util, weight;
 import std.algorithm, std.concurrency, std.getopt, std.math, std.stdio;
 import core.atomic, core.thread;
 
+version (GNU) {
+} else {
+	pragma(msg, "Please, compile me with GDC");
+	static assert(0);
+}
 
 /*
  * Vector  (as in Mathematics)
@@ -32,6 +37,7 @@ struct Vector {
 			foreach (i; 0 .. length) R[i] = -data[i];
 			return R;
 		}
+		assert(0);
 	}
 
 	/* operator overloading: V + W; V * W; etc. apply the operator to each member data */
@@ -157,40 +163,42 @@ enum ErrorType {absolute, square, logLikelihood}
 void getPartialError(const int id, shared GameBase games, const double [] weights, const double K, shared Sum *sum, const ErrorType errorType) {
 	double r, s;
 	shared Game game;
-	Sum part;
+	Sum part = Sum.init;
 	size_t end;
 
 	Board board = new Board;
-	Search search = new Search(256);
-	search.eval.setWeight(weights);
+	Search search = Search(1_048_576, 1, null); //TODO: with tasks ?
+	search.setWeight(weights);
 
-	while ((game = games.next()) !is null) if ((end = game.moves.length) > 20) {
-		search.clear();
-
+	while ((game = games.next()) !is null) {
 		board.set();
 		foreach (m; game.moves) board.update(m);
+		end = game.moves.length;
 		if (game.result == Result.draw) end -= board.fifty;
 		else end -= 10;
 
-		board.set();
-		foreach (m; game.moves[0 .. 10])  board.update(m);
-		foreach (m; game.moves[10 .. end]) {
-			search.set!false(board);
-			search.go(0);
-			s = sigmoid(search.score * K);
-			r = result(board.player, game);
-			if (errorType == ErrorType.logLikelihood) {     
-				if (r == 0.0) part += -log(1.0 - s);
-				else if (r == 1.0) part += -log(s);
-				else part += -2.0 * (log(1.0 - s) + log(s));
-      		} else if (errorType == ErrorType.square) {
-				part += ((r - s) ^^ 2);
-			} else if (errorType == ErrorType.absolute) {
-				part += abs(r - s);
-			} else {
-				unreachable();
+		if (end > 15) {
+			search.clear();
+			board.set();
+			foreach (m; game.moves[0 .. 10])  board.update(m);
+			foreach (m; game.moves[10 .. end]) {
+				search.position!(Copy.off)(board);
+				search.go(0);
+				s = sigmoid(search.score * K);
+				r = result(board.player, game);
+				if (errorType == ErrorType.logLikelihood) {
+					if (r == 0.0) part += -log(1.0 - s);
+					else if (r == 1.0) part += -log(s);
+					else part += -2.0 * (log(1.0 - s) + log(s));
+		  		} else if (errorType == ErrorType.square) {
+					part += ((r - s) ^^ 2);
+				} else if (errorType == ErrorType.absolute) {
+					part += abs(r - s);
+				} else {
+					unreachable();
+				}
+				board.update(m);
 			}
-			board.update(m);
 		}
 	}
 	synchronized {
@@ -252,7 +260,7 @@ class Amoeba {
 	/* compute the error from a vector */
 	double getError(const ref Vector v) {
 		v.get(weights, isTunable);
-		shared Sum sum;
+		shared Sum sum = Sum.init;
 		immutable double [] w = weights.idup;
 		games.clear();
 
@@ -268,33 +276,39 @@ class Amoeba {
 	void stats() {
 		double r, s;
 		int iGame, iMove;
+		shared Game g;
 
 		Board board = new Board;
-		Search search = new Search(65_536);
-		search.eval.setWeight(weights);
+		Search search = Search(1_048_576, 1, null);
+		search.setWeight(weights);
 		games.clear();
 
-		while (true) {
-			auto g = games.next();
-			if (g.moves.length == 0) break;
-			++iGame; iMove = 10;
-			board.set();
-			search.clear();
-			foreach (m; g.moves[0 .. 10]) board.update(m);
-			foreach (m; g.moves[10 .. $ - 10]) {
-				r = result(board.player, g);
-				write(iGame, ", ", iMove, ", ", r, ", ");
-				search.set!false(board);
-				write(search.eval.stage, ", ");
-				write(search.eval(board), ", ");
-				write(search.eval(board, -Score.mate, Score.mate), ", ");
-				foreach (depth; 0 .. 3) {
-					search.go(depth);
-					s = sigmoid(search.score);
-					write(search.score, ", ", s, ", ");
-					board.update(m);
+		writeln("game,move,result, stage, lazy, S(lazy), eval, S(eval), search_0, S(search_0), search_1, S(search_1), search_2, S(search_2)");
+		while ((g = games.next()) !is null) {
+			board.set(); foreach (m; g.moves) board.update(m);
+			auto end = g.moves.length;
+			if (g.result == Result.draw) end -= board.fifty;
+			else end -= 10;
+			if (end > 15) {
+				++iGame; iMove = 10;
+				board.set();
+				search.clear();
+				foreach (m; g.moves[0 .. 10]) board.update(m);
+				foreach (m; g.moves[10 .. end]) {
+					r = result(board.player, g);
+					write(iGame, ", ", iMove++, ", ", r, ", ");
+					search.position!(Copy.off)(board);
+					write(search.eval.stage, ", ");
+					s = search.eval(board); write(s, ", ", sigmoid(s), ", ");
+					s = search.eval(board, -Score.mate, Score.mate); write(s, ", ", sigmoid(s), ", ");
+					foreach (depth; 0 .. 3) {
+						search.go(depth);
+						s = sigmoid(search.score);
+						write(search.score, ", ", s, ", ");
+						board.update(m);
+					}
+					writeln();
 				}
-				writeln();
 			}
 		}
 	}
@@ -325,7 +339,7 @@ class Amoeba {
 		f.writeln("/*");
 		f.writeln(" * File weight.d");
 		f.writeln(" * Evaluation weight - automatically generated");
-		f.writeln(" * © 2016-2018 Richard Delorme");
+		f.writeln(" * © 2016-2019 Richard Delorme");
 		f.writeln(" */");
 		f.writeln("");
 		f.writeln("static immutable double [] initialWeights = [");
@@ -800,7 +814,7 @@ void main(string [] args) {
 	if (weightFile.length > 0) {
 		std.stdio.File file = std.stdio.File(weightFile, "w");
 		Amoeba.printWeights(amoeba.weights, file);
-		file.close();	
+		file.close();
 	}
 }
 
