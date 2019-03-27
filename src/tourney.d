@@ -2,128 +2,118 @@
  * File tourney.d
  * Organise a match beween two programs using UCI protocol
  * Play it until one program is found stronger than the other using the sprt approach.
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
-import util, board, move, game;
+import util, board, move, engine, game;
 import core.atomic;
 import std.algorithm, std.conv, std.format, std.getopt, std.parallelism, std.process, std.range, std.stdio, std.string;
 import std.math, std.mathspecial, std.random;
 
 /*
- * Engine
+ * Time
  */
-class Engine {
+struct Time {
 private:
-	string [] cmd;
-	string name;
-	ProcessPipes pipe;
-	Game.Info info;
+	double base;
+	int movesPerPeriod;
+	double increment;
+	double [Color.size] availableTime;
+	int movesToGo;
 
-	/* send a message to an engine */
-	void send(T...)(T args) {
-		pipe.stdin.writeln(args);
-		pipe.stdin.flush();
-	}
-
-	/* receive a message from an engine */
-	string receive() {
-		string l = pipe.stdout.readln();
-		l = chomp(l);
-		return l;
-	}
-
-	/* read game info */
-	void getInfo(string [] words) {
-		foreach(i; 0 .. words.length - 1) {
-			if (words[i] == "depth") info.depth = cast (ubyte) max(0, min(to!int(words[i + 1]), 255));
-			else if (words[i] == "cp") info.score = to!short(words[i + 1]);
-			else if (words[i] == "mate") {
-				const int matein = to!int(words[i + 1]);
-				if (matein < 0) info.score = cast (short) (-Score.mate - matein * 2);
-				else if (matein > 0) info.score = cast (short)  (Score.mate - matein * 2 + 1);
-			} else if (words[i] == "time") info.time = 0.001 * to!int(words[i + 1]);
-		}
-	}
-
-public:
-	/* constructor */
-	this(string [] c) {
-		cmd = c;
-		name = cmd[0];
-	}
-
-	/* constructor */
-	this(string s) {
-		name = s;
-		cmd ~= s;
-	}
-
-	/* wait for an engine to be ready */
-	void ready() {
-		string l;
-		send("isready");
-		do {
-			l = receive();
-		} while (l != "readyok");
-	}
-
-	/* start an engine */
-	void start(bool showDebug, int hashSize = 64) {
-		string l;
-
-		pipe = pipeProcess(cmd);
-		send("uci");
-		do {
-			l = receive();
-			if (l.skipOver("id name")) name = l.strip();
-			if (showDebug && l.skipOver("option name Log type check")) send("setoption name Log value true");
-			if (hashSize != 64 && l.skipOver("option name Hash type spin")) send("setoption name Hash value ", hashSize);
-		} while (l != "uciok");
-	}
-
-	/* end an engine */
-	void end() {
-		send("quit");
-		wait(pipe.pid);
-	}
-
-	/* new game */
-	void newGame() {
-		send("ucinewgame");
-		ready();
-	}
-
-	/* set a new position */
-	void position(string fen, const shared Move [] moves) {
-		string s = "position ";
-		if (fen is null) s ~= "startpos";
-		else s ~= "fen " ~ fen;
-
-		if (moves.length > 0) {
-			s ~= " moves";
-			foreach(m; moves[0 .. $]) s ~= " " ~ m.toPan();
-		}
-		send(s);
-	}
-
-	/* go */
-	Move go(const int ms) {
-		string l;
-		info = Game.Info.init;
-		send("go movetime ", ms);
-		while(true) {
-			l = receive();
-			if (l.skipOver("info ")) {
-				getInfo(l.split());
+	/* convert a time in [[hh]:mm:]s into seconds */
+	static double convert(string time) {
+		double t = 0.0;
+		if (time.length > 0) {
+			long m = -1;
+			long h = indexOf(time, ":");
+			if (h > -1) {
+				m = indexOf(time[h + 1 .. $], ":");
+				if (m == -1) {
+					m = h;
+					h = -1;
+				}
 			}
-			if (l.skipOver("bestmove ")) {
-				Move m  = l.strip().fromPan();
-				return m;
+			if (h > -1) t += 3600.0 * to!int(time[0 .. h]);
+			if (m > -1) t += 60.0 * to!int(time[h + 1 .. m]);
+			t += to!double(time[m + 1 .. $]);
+		}
+		return t;
+	}
+
+	/* convert a time setting */
+	this(const string time) {
+		string b, mpp, i;
+		long s0, s1;
+		s0 = indexOf(time, '/');
+		if (s0 > -1) {
+			b = time[0 .. s0];
+			s1 = indexOf(time[s0 + 1 .. $], '+');
+			if (s1 > -1) {
+				mpp = time[s0 + 1 .. s1];
+				i = time[s1 + 1 .. $];
+			} else mpp = time[s0 + 1 .. $];
+		} else {
+			mpp = "0";
+			s1 = indexOf(time, '+');
+			if (s1 > -1) b = time[0 .. s1];
+			i = time[s1 + 1 .. $];
+		}
+		base = convert(b);
+		movesPerPeriod = to!int(mpp);
+		increment = convert(i);
+		writeln("Time settings: base: ", base, " s; period: ", movesPerPeriod, " moves,  inc: ", increment, " s");
+		availableTime = [base, base];
+		movesToGo = movesPerPeriod;
+	}
+
+	/* return the string formatted to the go command */
+	string goString() const {
+		string s;
+		if (base == 0.0) {
+			s = format("movetime %.0f", 1000 * increment);
+		} else {
+			if (increment > 0.0) {
+				s = format("wtime %.0f winc %.0f btime %.0f binc %.0f", 1000 * availableTime[Color.white], 1000 * increment, 1000 * availableTime[Color.black], 1000 * increment);
+			} else  {
+				s = format("wtime %.0f btime %.0f", 1000 * availableTime[Color.white], 1000 * availableTime[Color.black]);
+			}
+			if (movesPerPeriod > 0) {
+				s ~= format(" movesToGo %d", movesToGo);
 			}
 		}
+		return s;
+	}
+
+	/* to string */
+	string toString() const {
+		if (base == 0.0) return "?";
+		if (movesPerPeriod) return format("%.0f/%d", base, movesPerPeriod);
+		else return format("%.0f+%.1f", base, increment);
+	}
+
+	/* update the available time & movestogo after a move. return false if all the alloted time has been consumed */
+	bool update(const Color player,  double time, double margin) {
+		if ((base > 0.0 && availableTime[player] < -margin) || (base == 0.0 && time > increment + margin)) {
+			writeln("time: ", base, "/", movesPerPeriod, "+", increment);
+			writeln("time: ", availableTime[player], "/", movesToGo, "+", increment, "->", time);
+			return false;
+		}
+		availableTime[player] += increment - time;
+		if (movesPerPeriod > 0) {
+			if (player == Color.black) --movesToGo;
+			if (movesToGo == 0) movesToGo += movesPerPeriod;
+		}
+		return true;
+	}
+
+	/* correct movesToGo after playing the opening */
+	void set(const Board b) {
+		const ply = (b.ply + b.plyOffset) / 2;
+		if (movesPerPeriod) movesToGo = (movesPerPeriod - ply % movesPerPeriod);
 	}
 }
+
 
 
 /*
@@ -132,17 +122,20 @@ public:
 class Match {
 	Engine [Color.size] engine;
 	shared Game game;
-	int ms;
+	Time time;
+	double margin;
 
 	/* create a new match setting */
-	this (Engine [Color.size] e, const shared Game opening, const double t) {
+	this (Engine [Color.size] e, const shared Game opening, const Time t, const double m) {
 		engine = e;
 		game = new shared Game(opening, true);
-		ms = cast (int) (1000 * t + 0.5);
+		time = t;
+		margin = m;
 	}
 
 	/* run a match */
 	int run(const int round) {
+		Chrono chrono;
 		Board b = new Board;
 		Result r;
 		Move m;
@@ -151,20 +144,28 @@ class Match {
 		foreach (t; game.tags) if (t.name == "FEN") fen = t.value;
 		if (fen is null) b.set(); else b.set(fen);
 		b.update(game.moves);
+		time.set(b);
 
 		engine[Color.white].newGame();
 		engine[Color.black].newGame();
 
 		while((r = b.isGameOver) == Result.none) {
 			engine[b.player].position(fen, game.moves);
-			m = engine[b.player].go(ms);
+			chrono.start();
+			m = engine[b.player].go(time.goString);
+			chrono.stop();
 			if (m == 0 || !b.isLegal(m)) {
-				if (b.player == Color.white) r = Result.blackWin; else r = Result.whiteWin;
 				b.write();
 				writefln("%s played the illegal move %s", engine[b.player].name, m.toPan());
+				r = [Result.whiteIllegalMove, Result.blackIllegalMove][b.player];
 				break;
 			}
 			game.push(m, engine[b.player].info);
+			if (!time.update(b.player, chrono.time, margin)) {
+				writefln("%s loses on time", engine[b.player].name);
+				r = [Result.whiteLossOnTime, Result.blackLossOnTime][b.player];
+				break;
+			}
 			b.update(m);
 		}
 
@@ -177,14 +178,15 @@ class Match {
 		game.push("Round", format("%d", round + 1));
 		game.push("White", engine[Color.white].name);
 		game.push("Black", engine[Color.black].name);
-		game.push("Result", r.fromResult!false());
+		game.push("Result", r.fromResult!(LongFormat.off)());
 		if (fen !is null) {
 			game.push("FEN", fen);
 			game.push("SetUp", "1");
 		}
+		game.push("TimeControl", time.toString());
 
-		if (r == Result.whiteWin) return 2;
-		else if (r == Result.blackWin) return 0;
+		if (r == Result.whiteWin || r == Result.blackLossOnTime || r == Result.blackIllegalMove) return 2;
+		else if (r == Result.blackWin || r == Result.whiteLossOnTime || r == Result.whiteIllegalMove) return 0;
 		else return 1;
 	}
 }
@@ -205,6 +207,7 @@ struct SPRT {
 	ulong [5] n;
 	ulong w, d, l;
 	string [2] name;
+	std.stdio.File logfile;
 
 private:
 	/* elo from winning probability */
@@ -235,6 +238,20 @@ private:
 		return v / N;
 	}
 
+	/* send formatted */
+	void sendf(T...) (string format, T args) {
+		writefln(format, args);
+		logfile.writefln(format, args);
+		logfile.flush();
+	}
+
+	/* send */
+	void send(T...) (T args) {
+		writeln(args);
+		logfile.writeln(args);
+		logfile.flush();
+	}
+
 public:
 	/* constructor */
 	this(const double elo0, const double elo1, const double α, const double β) {
@@ -243,6 +260,8 @@ public:
 		score1 = proba(elo1);
 		llr0 = log(β / (1 - α));
 		llr1 = log((1.0 - β) / α);
+		logfile.open("tourney.log", "w");
+
 	}
 
 	/* (re)set engine names */
@@ -276,14 +295,14 @@ public:
 		}
 		++n[s];
 
-		writeln(name[0], " vs ", name[1]);
-		writefln("results: %d games", w + d + l);
-		writefln("wdl:    w: %d, d: %d, l: %d", w, d, l);
-		writefln("pair:   0: %d, 0.5: %d, 1: %d, 1.5: %d, 2: %d", n[0], n[1], n[2], n[3], n[4]);
+		send(name[0], " vs ", name[1]);
+		sendf("results: %d games", w + d + l);
+		sendf("wdl:    w: %d, d: %d, l: %d", w, d, l);
+		sendf("pair:   0: %d, 0.5: %d, 1: %d, 1.5: %d, 2: %d", n[0], n[1], n[2], n[3], n[4]);
 	}
 
 	/* compute llr for a given variance */
-	int LLR(const double v) const {
+	int LLR(const double v) {
 		const ulong N = w + d + l;
 		const double score = (w + 0.5 * d) / N;
 		const double σ = sqrt(v);
@@ -291,36 +310,35 @@ public:
 		const double los = v > 0.0 ? normalDistribution((min(max(score, 0.5 / N), 1 - 0.5 / N) - 0.5) / σ) : 0.5;
 		int end = 0;
 
-		writefln("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
-		writefln("LOS: %.2f %%", 100.0 * los);
-		writefln("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
+		sendf("Elo: %.1f [%.1f, %.1f]", elo(score), elo(score -  Φ * σ), elo(score + Φ * σ));
+		sendf("LOS: %.2f %%", 100.0 * los);
+		sendf("LLR: %.3f [%.3f, %.3f]", llr, llr0, llr1);
 
 		if (llr < llr0) {
-			writeln("test rejected");
+			send("test rejected");
 			end = -1;
 		} else if (llr > llr1) {
-			writeln("test accepted");
+			send("test accepted");
 			end = 1;
 		} else {
 			end = 0;
 		}
-		writeln();
+		send();
 
 		return end;
 	}
 
-
 	/* stop if llr condition are met */
-	int stop(const Var v) const {
+	int stop(const Var v) {
 		int end = 0;
 
 		if (v & Var.pentanomial) {
-			writeln("Using variance of the pentanomial distribution of game pairs:");
+			send("Using variance of the pentanomial distribution of game pairs:");
 			end = LLR(var5());
 		}
 
 		if (v & Var.trinomial) {
-			writeln("Using variance of the trinomial distribution of single games:");
+			send("Using variance of the trinomial distribution of single games:");
 			const int e = LLR(var3());
 			if ((v & Var.pentanomial) && (e != end)) end = 0; else end = e;
 		}
@@ -338,12 +356,14 @@ private:
 	Engine [] player, opponent;
 	std.stdio.File output;
 	SPRT sprt;
+	Time time;
+	double margin = 0.0;
 
 	/* play a pair of matches, each engine playing white & black */
-	int match(const int i, const shared Game opening, const double time, const Var v) {
+	int match(const int i, const shared Game opening, const Var v) {
 		auto w = taskPool.workerIndex;
-		auto m1 = new Match([player[w], opponent[w]], opening, time);
-		auto m2 = new Match([opponent[w], player[w]], opening, time);
+		auto m1 = new Match([player[w], opponent[w]], opening, time, margin);
+		auto m2 = new Match([opponent[w], player[w]], opening, time, margin);
 		auto s1 = m1.run(i);
 		auto s2 = m2.run(i);
 		synchronized {
@@ -400,9 +420,9 @@ public:
 	}
 
 	/* start a pool of UCI engines */
-	void start(const bool showDebug, const int hashSize) {
-		foreach (ref e; player) e.start(showDebug, hashSize);
-		foreach (ref e; opponent) e.start(showDebug, hashSize);
+	void start(const bool showDebug, const int hashSize, const int nThreads) {
+		foreach (ref e; player) e.start(showDebug, hashSize, nThreads);
+		foreach (ref e; opponent) e.start(showDebug, hashSize, nThreads);
 
 		sprt.setEngineNames([player[0].name, opponent[0].name]);
 	}
@@ -414,11 +434,13 @@ public:
 	}
 
 	/* loop const parallel thru the games */
-	void loop(const int nGames, const double time, const Var v) {
+	void loop(const int nGames, const string t, const double m, const Var v) {
 		shared bool done = false;
+		time = Time(t);
+		margin = m;
 		foreach (i; taskPool.parallel(iota(nGames))) {
 			if (!done) {
-				bool r = (match(i, openings.next(true), time, v) != 0);
+				bool r = (match(i, openings.next(Loop.on), v) != 0);
 				done = atomicOp!"|"(done, r);
 			}
 		}
@@ -494,30 +516,31 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
  */
 void main(string [] args) {
 	EnginePool engines;
-	double time = 0.1;
-	int nGames = 30_000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64;
+	int nGames = 30_000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64, nThreads = 1;
 	bool showVersion, showHelp, showDebug, elo;
 	string [] engineName, openingFile;
-	string outputFile, var;
-	double H0 = -2.0, H1 = 2.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0, win = 0.0, loss = 0.0;
+	string outputFile, var, time="10+0.1";
+	double H0 = -2.0, H1 = 2.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0, win = 0.0, loss = 0.0, margin = 0.0;
 	Var v;
 
 	// read arguments
-	getopt(args, "engine|e", &engineName, "time|t", &time, "hash", &hashSize,
+	getopt(args, "engine|e", &engineName, "time|t", &time, "margin|m", &margin, "hash", &hashSize, "threads", &nThreads,
 		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
 		"simulation|s", &nSimulation, "draw|d", &draw, "white", &white,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
 		"elo", &elo, "win|w", &win, "loss|l", &loss,
 		"debug", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.6\n© 2017-2018 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.7\n© 2017-2019 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
 		writeln("\ntourney --engine|-e <cmd> --engine|-e <cmd>  [optional settings]") ;
 		writeln("    --engine|-e <cmd>        launch an engine with <cmd>. 2 engines should be loaded");
-		writeln("    --time|-t <movetime>     time (in seconds) to play a move (default 0.1s)");
+		writeln("    --time|-t <time>         time ([h:][m:]s[/period]+[m:]s) to play a game (default 10+0.1)");
+		writeln("    --margin|-m <seconds>    time tolerance before declaring a time loss (default 0.0)");
 		writeln("    --hash <MB>              hash size in MB (default 64)");
+		writeln("    --threads <n>            number of threads allowed per engine (default 1)");
 		writeln("    --book|-b <pgn|epd file> opening book");
 		writeln("    --random|-r depth>       random opening moves up to <depth>");
 		writeln("    --output|-o <pgn file>   save the played games");
@@ -583,8 +606,8 @@ void main(string [] args) {
 		else engines = new EnginePool(engineName, openingFile, outputFile, H0, H1, α, β);
 
 		// run the tournament
-		engines.start(showDebug, hashSize);
-		engines.loop(nGames, time, v);
+		engines.start(showDebug, hashSize, nThreads);
+		engines.loop(nGames, time, margin, v);
 		engines.end();
 	}
 }
