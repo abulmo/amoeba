@@ -50,9 +50,9 @@ struct Entry {
 
 	/* refresh the aging date */
 	void refresh(const int date) {
-		code ^= blur;	
+		code ^= blur;
 		info = cast (ushort) ((info & 1023) | (date << 10));
-		code ^= blur;	
+		code ^= blur;
 	}
 
 	/* store common data to update & set into this entry */
@@ -64,16 +64,16 @@ struct Entry {
 
 	/* update an existing entry */
 	void update(const int d, const int date, const Bound b, const bool singular, const int s, const int v, const Move m) {
-		code ^= blur;	
+		code ^= blur;
 		store(b, d, date, singular, s, v);
-		code ^= blur;	
+		code ^= blur;
 		if (m != move[0]) { move[1] = move[0]; move[0] = m; }
 	}
 
 	/* set a new entry */
 	void set(const Key k, const int d, const int date, const Bound b, const bool singular, const int s, const int v, const Move m) {
 		store(b, d, date, singular, s, v);
-		code = (k.code ^ blur);	
+		code = (k.code ^ blur);
 		move = [m, 0];
 	}
 
@@ -179,7 +179,7 @@ final class TranspositionTable {
 }
 
 /*
- * Search option 
+ * Search option
  */
 struct Option {
 	struct Time {
@@ -309,7 +309,7 @@ private:
 
 	Thread thread;
 	shared bool stop;
-	
+
 	/* is the main task */
 	bool isMaster() {
 		return id == 0;
@@ -372,7 +372,7 @@ private:
 
 		double a = 0.09 * r + 1.94;
 		double b = -5.74 * r + 48.52;
-	
+
 		return cast (int) (a * d + b);
 	}
 
@@ -416,7 +416,7 @@ private:
 
 		//max depth reached
 		if (ply == Limits.ply.max) return v;
-		
+
 		if (ply > selDepth) selDepth = ply;
 
 		// move generation: good captures & promotions if not in check
@@ -733,7 +733,7 @@ private:
 		for (d = option.depth.begin; persist(d); ++d) {
 			if (id > 0 && d < option.depth.end && (id + d) % 4 == 0) continue;
 			multiPv(option.multiPv, d);
-		}		
+		}
 		stop = true;
 		if (search.message) search.message.log("smp> task[", id, "] finished: ", info.toUCI(option.multiPv, tt, nNodes));
 	}
@@ -769,7 +769,7 @@ private:
 		if (search.message) search.message.log("smp> task[", id, "] launched");
 		thread = new Thread((){iterate();});
 		thread.start();
-	}	
+	}
 
 	/* stop the search */
 	void abort() {
@@ -808,13 +808,13 @@ private:
 
 /*
  * Search interface
- * Manage a set of tasks 
+ * Manage a set of tasks
  */
 struct Search {
 	Task [] tasks;
 	Task *master;
 	TranspositionTable tt;
-	Option option; 
+	Option option;
 	Chrono timer;
 	Message message;
 	Eval eval;
@@ -875,7 +875,7 @@ struct Search {
 	void setWeight(const double [] weights) {
 		foreach(ref t; tasks) t.eval.setWeight(weights);
 
-	}		
+	}
 
 	/* set a new board position */
 	void position(Copy copy = Copy.on)(Board board) {
@@ -916,7 +916,7 @@ struct Search {
 
 		timer.stop();
 	}
-	
+
 	/* go search without aspiration window nor iterative deepening */
 	void go(const int d) {
 		timer.start();
