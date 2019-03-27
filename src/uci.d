@@ -1,16 +1,17 @@
 /*
  * File uci.d
  * Universal Chess Interface.
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 module uci;
 
 import board, eval, move, search, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
+import core.thread;
 
 /* version */
-enum string versionNumber = "2.8";
+enum string versionNumber = "3.0";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -38,11 +39,6 @@ string arch() @property {
 	return a;
 }
 
-/* spawnable message loop function */
-void messageLoop(shared util.Message m) {
-	m.loop();
-}
-
 /* uci class */
 class Uci {
 	string name;
@@ -55,7 +51,7 @@ class Uci {
 	Search search;
 	Board board;
 	Moves moves;
-	shared util.Message message;	
+	util.Message message;
 	Time [Color.size] time;
 	int depthMax, movesToGo, multipv;
 	ulong nodesMax;
@@ -64,10 +60,10 @@ class Uci {
 	/* constructor */
 	this(const bool dbg = false) {
 		name = "Amoeba " ~ versionNumber ~ '.' ~ arch;
-		search = new Search;
-		search.message = message = new shared util.Message(name);
+		message = new util.Message(name);
 		if (dbg) message.logOn();
 		board = new Board;
+		search = Search(67_108_864, 1, message);
 		ucinewgame();
 		canPonder = false;
 		search.option.verbose = true;
@@ -83,14 +79,16 @@ class Uci {
 
 		if (t > 0) {
 			if (movesToGo > 0) todo = movesToGo;
-			t += time[p].increment * todo;
+			t += todo * time[p].increment;
 			t = max(t - 1.0, 0.95 * t) / todo;
+ 			t = min(t, time[p].remaining - 0.1);
 		} else {
 			t = time[p].increment;
 			if (t > 0) {
-				t = max(t - 1.0, 0.95 * t);
+				t = max(t - 1.0, 0.95 * t) - 0.015;
 			} else t = double.infinity;
 		}
+		t = max(0.01, t);
 
 		return t;
 	}
@@ -100,9 +98,8 @@ class Uci {
 		const p = board.player;
 		double t;
 
-		t = (time[p].remaining + time[p].increment) * 0.1;
-		if (t <= 0) t = double.infinity;
-		t = max(maxTime, min(2.0 * maxTime, t));
+		t = max(maxTime, min(2.0 * maxTime, time[p].remaining * 0.1)); 
+		message.log("time> ", time[p].remaining, "/", movesToGo, "+", time[p].increment, " -> time.max: ", maxTime, ", time.extra: ", t);
 
 		return t;
 	}
@@ -113,6 +110,7 @@ class Uci {
 		message.send("id author Richard Delorme");
 		message.send("option name Ponder type check default false");
 		message.send("option name Hash type spin default 64 min 1 max ", 4096 * Entry.sizeof);
+		message.send("option name Threads type spin default 1 min 1 max 256");
 		message.send("option name Log type check default ", message.isLogging());
 		message.send("option name MultiPV type spin default 1 min 1 max 256");
 		message.send("option name UCI_AnalyseMode type check default false");
@@ -126,8 +124,11 @@ class Uci {
 		findSkip(line, "value");
 		string value = line.strip().toLower();
 		if (option == "ponder") canPonder = to!bool(value);
-		else if (option == "hash") search.resize(to!size_t(value) * 1024 * 1024);
-		else if (option == "multipv") multipv = to!int(value);
+		else if (option == "hash") search.resize(clamp(to!size_t(value), 1, 4096 * Entry.sizeof) * 1024 * 1024);
+		else if (option == "threads") {
+			search.threads(clamp(to!int(value), 1, 255));
+			search.position(board);
+		} else if (option == "multipv") multipv = clamp(to!int(value), 1, 256);
 		else if (option == "uci_analysemode") easy = !to!bool(value);
 		else if (option == "log") {
 			if (to!bool(value)) message.logOn();
@@ -140,7 +141,7 @@ class Uci {
 	void ucinewgame() {
 		search.clear();
 		board.set();
-		search.set(board);
+		search.position(board);
 	}
 
 	/* set a new position */
@@ -151,7 +152,7 @@ class Uci {
 			auto words = line.split();
 			foreach(w ; words) board.update(fromPan(w));
 		}
-		search.set(board);
+		search.position(board);
 	}
 
 	/* search only some moves */
@@ -170,13 +171,13 @@ class Uci {
 
 	/* go */
 	void go(string line) {
-		Termination termination;
+		Option option;
 		string [] words = line.split();
 		bool doPrune = true;
 
 		moves.clear();
-		termination.depth.max = Limits.ply.max;
-		termination.nodes.max = ulong.max;
+		option.depth.end = Limits.ply.max;
+		option.nodes.max = ulong.max;
 		foreach(c ; Color.white .. Color.size) time[c].clear();
 		isPondering = infiniteSearch = false;
 		foreach(i, ref w ; words) {
@@ -187,29 +188,34 @@ class Uci {
 			else if (w == "winc" && i + 1 < words.length) time[Color.white].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "binc" && i + 1 < words.length) time[Color.black].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "movestogo" && i + 1 < words.length) movesToGo = to!int(words[i + 1]);
-			else if (w == "depth" && i + 1 < words.length) termination.depth.max = to!int(words[i + 1]);
-			else if (w == "nodes" && i + 1 < words.length) termination.nodes.max = to!ulong(words[i + 1]);
+			else if (w == "depth" && i + 1 < words.length) option.depth.end = to!int(words[i + 1]);
+			else if (w == "nodes" && i + 1 < words.length) option.nodes.max = to!ulong(words[i + 1]);
 			else if (w == "mate") {
 				doPrune = false;
-				if (i + 1 < words.length) termination.depth.max = to!int(words[i + 1]);
+				if (i + 1 < words.length) option.depth.end = to!int(words[i + 1]);
 			} else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
-			else if (w == "infinite") { termination.depth.max =  Limits.ply.max; infiniteSearch = true; }
+			else if (w == "infinite") { option.depth.end =  Limits.ply.max; infiniteSearch = true; }
 		}
-		termination.time.max = setTime();
-		termination.time.extra = setExtraTime(termination.time.max);
+		option.time.max = setTime();
+		option.time.extra = setExtraTime(option.time.max);
+		option.easy = (easy && multipv == 1 && doPrune == true && time[board.player].remaining > 0.0);
+		option.multiPv = multipv;
+		option.isPondering = isPondering;
+		option.doPrune = doPrune;
+		option.verbose = true;
 
-		search.go(termination, moves, (easy && multipv == 1), multipv, isPondering, doPrune);
+		search.go(option, moves);
 		if (!isPondering && !infiniteSearch) bestmove();
 	}
 
-	/* play a move after stop has been received or ponderHit */
+	/* play a move after stop or ponderHit has been received */
 	void play() {
 		if (isPondering || infiniteSearch) bestmove();
 	}
 
 	/* main loop */
 	void loop(const bool readStdin = true) {
-		if (readStdin) spawn(&messageLoop, message);
+		if (readStdin) message.daemon();
 		while (stdin.isOpen) {
 			auto line = message.retrieve();
 			if (line is null || line == "" || line[0] == '#') continue;
