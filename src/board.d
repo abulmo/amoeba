@@ -1,7 +1,7 @@
 /*
  * File board.d
  * Chess board representation, move generation, etc.
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 module board;
@@ -242,6 +242,15 @@ struct Key {
 	uint code() const @property {
 		return cast (uint) (zobrist >> 32);
 	}
+
+	/* create a key from the current positional key with a move excluded */
+	Key exclude(const Move m) const {
+		Key k;
+		k.zobrist = zobrist ^ (m * 2862933555777941757);
+		return k; 
+	}
+
+
 }
 
 
@@ -302,13 +311,13 @@ struct Mask {
 /*
  * Game result
  */
-enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, size}
+enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, whiteLossOnTime, blackLossOnTime, whiteIllegalMove, blackIllegalMove, size}
 
 version (withGameSupport) {
 	/* to string */
-	string fromResult(bool longFormat)(const Result r) {
+	string fromResult(LongFormat f)(const Result r) {
 		with (Result) {
-			if (longFormat) final switch (r) {
+			static if (f == LongFormat.on) final switch (r) {
 				case none: return "*";
 				case draw: return "{Draw} 1/2-1/2";
 				case repetitionDraw: return "{Draw by repetition} 1/2-1/2";
@@ -317,11 +326,19 @@ version (withGameSupport) {
 				case stalemateDraw: return "{Stalemate} 1/2-1/2";
 				case whiteWin: return "{White wins} 1-0";
 				case blackWin: return "{Black wins} 0-1";
+				case whiteLossOnTime: return "{White loses on time} 0-1";
+				case blackLossOnTime: return "{Black loses on time} 1-0";
+				case whiteIllegalMove: return "{White plays an illegal move} 0-1";
+				case blackIllegalMove: return "{Black plays an illegal move} 1-0";
 				case size: return "";
 			} else switch(r) {
 				case none: return "*";
 				case whiteWin: return "1-0";
 				case blackWin: return "0-1";
+				case whiteLossOnTime: return "0-1";
+				case blackLossOnTime: return "1-0";
+				case whiteIllegalMove: return "0-1";
+				case blackIllegalMove: return "1-0";
 				default: return "1/2-1/2";
 			}
 		}
@@ -867,7 +884,7 @@ public:
 	}
 
 	/* convert to a fen string */
-	string toFen() const {
+	string toFen(LongFormat lf = LongFormat.on)() const {
 		Square x;
 		int f, r, e, l;
 		string p = ".PpNnBbRrQqKk#", c = "wb", n = "012345678", s;
@@ -895,7 +912,7 @@ public:
 		if (!stack[ply].castling) s ~= "-";
 		if (stack[ply].enpassant != Square.none) s ~= format(" %s ", stack[ply].enpassant);
 		else s ~= " - ";
-		s ~= format("%d %d", stack[ply].fifty, (ply + plyOffset) / 2 + 1);
+		if (lf == LongFormat.on) s ~= format("%d %d", stack[ply].fifty, (ply + plyOffset) / 2 + 1);
 
 		return s;
 	}
