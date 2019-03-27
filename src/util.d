@@ -2,7 +2,7 @@
  * File util.d
  * Fast implementation on X86_64, portable algorithm for other platform
  * of some bit functions.
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 module util;
@@ -21,6 +21,15 @@ struct Limits {
 }
 
 enum Score {mate = 30_000, low = -29_000, high = 29_000, big = 3_000}
+
+enum LongFormat {off = false, on}
+
+enum Copy {off = false, on}
+
+enum Debug {off = false, on}
+
+enum Loop {off = false, on}
+
 
 /*
  * bit utilities
@@ -84,7 +93,7 @@ void prefetch(void *v) {
  */
 struct Chrono {
 	private {
-		__gshared TickDuration tick;
+		TickDuration tick;
 		bool on;
 	}
 
@@ -134,16 +143,18 @@ string hour() {
  * manage all io:
  *  - communication with the GUI
  *  - logging for debugging
+ *  - internal message passing
  */
-shared class Message {
+class Message {
 private:
 	string [] ring;
 	size_t first, last;
-	class Lock {};
-	Lock lock;
+	shared class Lock {};
+	Lock lock, ioLock;
 	string header;
-	__gshared File logFile;
+	File logFile;
 
+public:
 	/* ring is empty */
 	bool empty() const @property {
 		return first == last;
@@ -153,12 +164,18 @@ private:
 	bool full() const @property {
 		return first == (last + 1)  % ring.length;
 	}
-public:
+
 	/* constructor */
 	this (string h = "") {
 		ring.length = 4;
-		lock = new shared Lock;
+		lock = new Lock;
+		ioLock = new Lock;
 		header = h;
+	}
+
+	/* clear */
+	void clear() {
+		first = last = 0;
 	}
 
 	/* push a new event to the ring */
@@ -210,6 +227,13 @@ public:
 		log("Bye!");
 	}
 
+	/* daemon */
+	void daemon() {
+		auto t = new Thread((){loop();});
+		t.isDaemon = true;
+		t.start();
+	}
+
 	/* send */
 	void send(T...) (T args) {
 		stdout.writeln(args);
@@ -219,10 +243,20 @@ public:
 
 	/* log */
 	void log(const char tag = '#', T...) (T args) {
-		if (logFile.isOpen) {
-			logFile.writef("[%s %s] %s%c ", date(), hour(), header, tag);
-			logFile.writeln(args);
-			logFile.flush();
+		synchronized (ioLock) {
+			if (logFile.isOpen) {
+				logFile.writef("[%s %s] %s%c ", date(), hour(), header, tag);
+				logFile.writeln(args);
+				logFile.flush();
+			}
+		}
+	}
+
+	void write(const char tag = '#', T...) (T args) {
+		synchronized (ioLock) {
+			if (logFile.isOpen) {
+				logFile.write(args);
+			}
 		}
 	}
 
