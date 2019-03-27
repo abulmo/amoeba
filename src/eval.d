@@ -1,7 +1,7 @@
 /*
  * File eval.d
  * Evaluation function
- * © 2016-2018 Richard Delorme
+ * © 2016-2019 Richard Delorme
  */
 
 module eval;
@@ -565,15 +565,6 @@ private:
 		return v;
 	}
 
-	/* opposite-colored bishop : verify if only panws + single bishops on opposite-colored squares */
-	bool oppositeBishop(const Board b) const {
-		const ulong bishops = b.piece[Piece.bishop];
-		const ulong pawns = b.piece[Piece.pawn];
-		const ulong occupancies = ~b.piece[Piece.none];
-		const ulong whites = b.color[Color.white], blacks = b.color[Color.black];
-		return ((bishops | pawns) == occupancies && hasSingleBit(bishops & whites) && hasSingleBit(bishops & blacks) && hasSingleBit(bishops & b.blackSquares));
-	}
-
 	/* drawish position */
 	int bound(const Board b, const int value) const {
 		const Stack *s = &stack[ply];
@@ -590,7 +581,6 @@ private:
 				if ((d[0] == s.materialIndex[0] && d[1] == s.materialIndex[1])
 				 || (d[1] == s.materialIndex[0] && d[0] == s.materialIndex[1])) return value / 16; // TODO; tune
 			}
-			if (oppositeBishop(b)) return value / 2; // TODO: tune
 
 			if (s.stage == 0) return kpk.rescale(b, value); // king vs king + pawn
 		}
@@ -784,6 +774,11 @@ public:
 	void resize(size_t size) {
 		pawnTable.length = 1 << lastBit(size / PawnEntry.sizeof);
 		clear();
+	}
+
+	/* get the size of the pawn hash table */
+	size_t size() const {
+		return pawnTable.length * PawnEntry.sizeof;
 	}
 
 	/* Constructor (initialize evaluation weights & allocate pawnhash table) */
