@@ -170,7 +170,6 @@ void main(string [] arg) {
 	Engine engine;
 	std.stdio.File epd;
 
-
 	// read arguments
 	getopt(arg, std.getopt.config.caseSensitive, "engine|e", &executable, "movetime|t", &tMax, "depth|d", &dMax, "hash|H", &ttSize,
 		"cpu|c", &nCpu, "width|w", &width, "file|f", &gameFile, "analyse|a", &analyseMode, "epd|o", &epdFile, 
@@ -211,7 +210,9 @@ void main(string [] arg) {
 		engine.start(showDebug, ttSize, nCpu);
 		writeln(engine.name, " used for analysis");
 	} else {
-		search = new Search(ttSize * 1_024 * 1_024, nCpu, new Message("postmortem"));
+		// Have to convert type, otherwise we risk to get 0 because the value will go out of bounds
+		size_t inBytes = cast(size_t)ttSize * 1_024 * 1_024;
+		search = new Search(inBytes, nCpu, new Message("postmortem"));
 		if (showDebug) search.message.logOn();
 		writeln("Internal engine used for analysis");
 	}
