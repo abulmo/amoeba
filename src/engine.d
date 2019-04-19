@@ -53,6 +53,19 @@ private:
 		}
 	}
 
+	/* check & set spin option */
+	void setSpinOption(string [] words, string name, int value) {
+		int d, m, M;
+		foreach(i; 0 .. words.length - 1) {
+			if (words[i] == "default") d = to!int(words[i + 1]);
+			if (words[i] == "min") m = to!int(words[i + 1]);
+			if (words[i] == "max") M = to!int(words[i + 1]);
+		}
+		value = clamp(value, m, M);
+		if (value != d) send("setoption name ", name, " value ", value);
+	}
+
+
 public:
 	string name;
 	Game.Info info;
@@ -90,8 +103,8 @@ public:
 			l = receive();
 			if (l.skipOver("id name")) name = l.strip();
 			if (showDebug && l.skipOver("option name Log type check")) send("setoption name Log value true");
-			if (hashSize != 64 && l.skipOver("option name Hash type spin")) send("setoption name Hash value ", hashSize);
-			if (nThreads != 1 && l.skipOver("option name Threads type spin")) send("setoption name Threads value ", nThreads);
+			if (l.skipOver("option name Hash type spin")) setSpinOption(l.split(), "Hash", hashSize);
+			if (l.skipOver("option name Threads type spin")) setSpinOption(l.split(), "Threads", nThreads);
 			if (l.skipOver("option name UCI_AnalyseMode type check")) analyseModeSupport = true;
 		} while (l != "uciok");
 	}
