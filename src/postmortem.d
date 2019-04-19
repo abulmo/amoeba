@@ -1,10 +1,11 @@
 /*
- * Posmortem analysis
+ * Postmortem retro-analysis
+ * © 2016-2019 Richard Delorme
  */
 
 module postmortem;
 
-import game, search, board, move, util, engine;
+import game, search, board, move, util, uci, engine;
 import std.stdio, std.getopt, std.algorithm, std.format, std.uni, std.conv;
 
 /*
@@ -44,6 +45,7 @@ void analyse(shared Game game, Search *search, Engine engine, const ref search.O
 		else return "  ";
 	}
 
+	// print the Principal variation on a single or several aligned lines.
 	void pvPrint(string text) {
 		const int margin = 32;
 		size_t a, b;
@@ -60,10 +62,11 @@ void analyse(shared Game game, Search *search, Engine engine, const ref search.O
 		if (a < text.length) writeln(text[a .. $]);
 	}
 
-	void save(const Move bm) {
+	// save a bad move to an epd file
+	void save(const Move bm, const Move am) {
 		static int id;
 		if (epd.isOK && score[0] < score[1] - 100) {
-			epd.writeln(board.toFen!(LongFormat.off)(), " bm ", bm.toSan(board), "; id \"", ++id, "\";");
+			epd.writeln(board.toFen!(LongFormat.off)(), " bm ", bm.toSan(board), "; am = ", am.toSan(board), "; id \"", ++id, "\";");
 		}
 	}
 
@@ -145,7 +148,7 @@ void analyse(shared Game game, Search *search, Engine engine, const ref search.O
 			pvPrint(pv.toSan(board));
 
 			// save to epd file
-			if (cmp() == '<') save(pv.move[0]);
+			if (cmp() == '<') save(pv.move[0], m);
 
 			// keep the best score
 			if (score[1] > score[0]) score[0] = score[1];
@@ -160,8 +163,10 @@ void analyse(shared Game game, Search *search, Engine engine, const ref search.O
 
 void main(string [] arg) {
 	double tMax = double.infinity;
-	int dMax = Limits.ply.max, nCpu = 1;
-	int ttSize = 256, width = 120;
+	int dMax = Limits.ply.max;
+	int nCpu = 1;
+	int width = 120;
+	int ttSize = 256;
 	search.Option option;
 	Moves moves;
 	string gameFile, executable, epdFile;
@@ -185,14 +190,14 @@ void main(string [] arg) {
 		writeln("  --width|-w <width>      set the width of the printed lines (default: 120)");
 		writeln("  --file[-f <pgn>         name of the game file to analyze");
 		writeln("  --analyse|-a            set UCI_AnalyseMode option to true, if supported");
-		writeln("  --epd|-d <file>         output found errors into this epd file");
+		writeln("  --epd|-o <file>         output found errors into this epd file");
 		writeln("  --debug|-g              switch debugging on");
-		writeln("    --help|-h             display this help");
-		writeln("    --version             show version number");
+		writeln("  --help|-h               display this help");
+		writeln("  --version               show version number");
 		return;
 	}
 	if (showVersion) {
-		writeln("Postmortem version 1.0 (c) 2019 - Richard Delorme");
+		writeln("Postmortem version 1.1 (c) 2019 - Richard Delorme");
 	}
 
 	option.time.max = option.time.extra = tMax;
@@ -202,7 +207,6 @@ void main(string [] arg) {
 	option.multiPv = 1;
 	option.verbose = false;
 	option.doPrune = !analyseMode;
-	ttSize = min(65_536, max(1, ttSize));
 	if (executable.length > 0) {
 		engine = new Engine(executable);
 		if (showDebug) engine.startDebugging("postmortem");
@@ -210,11 +214,11 @@ void main(string [] arg) {
 		engine.start(showDebug, ttSize, nCpu);
 		writeln(engine.name, " used for analysis");
 	} else {
-		// Have to convert type, otherwise we risk to get 0 because the value will go out of bounds
-		size_t inBytes = cast(size_t)ttSize * 1_024 * 1_024;
-		search = new Search(inBytes, nCpu, new Message("postmortem"));
+		ttSize = clamp(ttSize, 1, 65_536);
+		size_t ttSizeInBytes = (cast(size_t) ttSize) * 1_024 * 1_024;
+		search = new Search(ttSizeInBytes, nCpu, new Message("postmortem"));
 		if (showDebug) search.message.logOn();
-		writeln("Internal engine used for analysis");
+		writeln("Internal engine used for analysis: amoeba " ~ versionNumber);
 	}
 	shared GameBase base = new shared GameBase;
 	base.read(gameFile);
