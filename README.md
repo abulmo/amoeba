@@ -31,6 +31,8 @@ to be easy to read & understand.
   - aspiration window;
   - iterative deepening;
   - static exchange evaluation (see) - iterative version;
+  - singular move extension
+  - probcut
   
 - algorithms used in evaluation
   - tuned weights with the "Nelder-Mead simplex method", aka amoeba (so the name of the program); 
@@ -40,7 +42,6 @@ to be easy to read & understand.
 
 - algorithm tried but discarded:
   - enhanced transposition cutoff (ETC); 
-  - probcut
   - ...
 
 
