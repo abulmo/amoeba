@@ -130,7 +130,7 @@ perf : $(AMOEBA_SRC)
 	$(MAKE) BUILD=perf EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
 amoeba: $(AMOEBA_SRC)
-	$(MAKE) build-pgo EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+	$(MAKE) pgo EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
 tourney: $(TOURNEY_SRC)
 	$(MAKE) EXE=tourney CPU=$(CPU) POPCOUNT=$(POPCOUNT) GAME=true
