@@ -1,12 +1,11 @@
 /*
  * File util.d
- * Fast implementation on X86_64, portable algorithm for other platform
- * of some bit functions.
- * © 2016-2019 Richard Delorme
+ * Miscellaneous utilities
+ * © 2016-2020 Richard Delorme
  */
 
 module util;
-import std.array, std.conv, std.datetime, std.format, std.process, std.stdio, std.string;
+import std.array, std.conv, std.datetime, std.format, std.parallelism, std.process, std.stdio, std.string;
 import core.bitop, core.simd, core.time, core.thread, core.stdc.stdlib;
 
 version (LDC) import ldc.intrinsics;
@@ -45,14 +44,12 @@ bool hasSingleBit(const ulong b) {
 }
 
 /* Get the first bit set */
-version (LDC) int firstBit(ulong b) {return cast (int) llvm_cttz(b, true);}
+version (LDC) int firstBit(ulong b) { return cast (int) llvm_cttz(b, true); }
 else version (GDC) alias firstBit = __builtin_ctz;
 else alias firstBit = bsf;
 
 /* Get the last bit set */
-version (LDC) int lastBit(ulong b) {return cast (int) llvm_ctlz(b, true);}
-version (GDC) alias lastBit = __builtin_clz;
-else alias lastBit = bsr;
+alias lastBit = bsr;
 
 /* Extract a bit */
 int popBit(ref ulong b) {
@@ -92,10 +89,8 @@ void prefetch(void *v) {
  * struct Chrono
  */
 struct Chrono {
-	private {
-		TickDuration tick;
-		bool on;
-	}
+	private TickDuration tick;
+	bool on;
 
 	/* start */
 	void start() {
@@ -232,6 +227,7 @@ public:
 		auto t = new Thread((){loop();});
 		t.isDaemon = true;
 		t.start();
+		t.setAffinity(totalCPUs - 1);
 	}
 
 	/* send */
@@ -243,8 +239,8 @@ public:
 
 	/* log */
 	void log(const char tag = '#', T...) (T args) {
-		synchronized (ioLock) {
-			if (logFile.isOpen) {
+		if (logFile.isOpen) {
+			synchronized (ioLock) {
 				logFile.writef("[%s %s] %s%c ", date(), hour(), header, tag);
 				logFile.writeln(args);
 				logFile.flush();
@@ -253,8 +249,8 @@ public:
 	}
 
 	void write(const char tag = '#', T...) (T args) {
-		synchronized (ioLock) {
-			if (logFile.isOpen) {
+		if (logFile.isOpen) {
+			synchronized (ioLock) {
 				logFile.write(args);
 			}
 		}
@@ -274,6 +270,55 @@ public:
 	bool isLogging() {
 		return logFile.isOpen;
 	}
+}
+
+/*
+ * CPU utilities
+ */
+struct CPUAffinity {
+	int offset = 0;
+	int step = 0;
+
+	void set(string text) {
+		ptrdiff_t s = indexOf(text, ":");
+		if (s > -1) {
+			offset = to!int(text[0 .. s]);
+			step = to!int(text[s + 1 .. $]);
+		} else {
+			offset = 0;
+			step = to!int(text);
+		}
+
+	}
+}
+
+version (linux) {
+
+	import core.sys.linux.sched, core.sys.posix.pthread;
+	extern (C) int pthread_setaffinity_np(pthread_t thread, size_t cpusetsize, const cpu_set_t *cpuset);
+	extern (C) int pthread_getaffinity_np(pthread_t thread, size_t cpusetsize, cpu_set_t *cpuset);
+
+	/* attach a thread to a cpu */
+	void setAffinity(Thread thread, const size_t cpu) {
+		cpu_set_t cpuset;
+		
+		CPU_SET(cpu, &cpuset);
+
+		if (pthread_setaffinity_np(thread.id, cpuset.sizeof, &cpuset) != 0) throw new Exception("cannot set affinity");
+
+	}
+
+} else version (windows) {
+
+	void setAffinity(Thread thread, const size_t cpu) {
+		stderr.writeln(__FUNCTION__, " not implemented");
+	}
+
+} else {
+	void setAffinity(Thread thread, const size_t cpu) {
+		stderr.writeln(__FUNCTION__, " not implemented");
+	}
+
 }
 
 
@@ -308,5 +353,10 @@ string findBetween(string s, string start, string end) {
 /* check if a File is writeable/readable */
 bool isOK(const std.stdio.File f) @property {
 	return f.isOpen && !f.eof && !f.error;
+}
+
+/* Mbytes to bytes */
+size_t MBytes(const size_t s) {
+	return s * 1024 * 1024;
 }
 
