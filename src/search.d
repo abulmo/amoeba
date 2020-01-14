@@ -1,13 +1,13 @@
 /*
  * File search.d
  * Best move search.
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 module search;
 
 import board, eval, kpk, move, util;
-import std.algorithm, std.concurrency, std.conv, std.format, std.getopt, std.math, std.stdio, std.string, std.traits;
+import std.algorithm, std.concurrency, std.parallelism, std.conv, std.format, std.getopt, std.math, std.stdio, std.string, std.traits;
 import core.atomic, core.thread;
 
 /* Hash table score bound */
@@ -196,10 +196,16 @@ struct Option {
 	struct Score {
 		int begin;
 	}
+	struct CPU {
+		int max;
+		CPUAffinity affinity;
+	}
+
 	Time time;
 	Nodes nodes;
 	Depth depth;
 	Score score;
+	CPU cpu;
 	int multiPv;
 	bool easy;
 	bool isPondering;
@@ -479,7 +485,7 @@ private:
 			}
 			v = fromHash(h.value);
 			if ((h.bound != Bound.upper && s > v) || (h.bound != Bound.lower && s < v)) v = s;
-		} else v = eval(board);
+		} else v = eval(board, α, β);
 
 		// max depth reached
 		if (ply == Limits.ply.max) return v;
@@ -493,10 +499,11 @@ private:
 
 			// razoring (our position is so bad, no need to search further)
 			if (v <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
+			// TODO if (d <= 2 && v <= α - δ) return qs(α, β);
 
 			if (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king])) {
 				// eval pruning (our position is very good, no need to search further)
-				if (v >= β + δ) return β;
+				if (v >= β + δ && v < Score.high) return v;
 
 				// null move
 				if (d >= 2 && v >= β) {
@@ -507,10 +514,7 @@ private:
 					if (stop) return α;
 					if (s >= β) {
 						if (s >= Score.high) s = β;
-						if (d < 10 ||  (s = αβ(β - 1, β, d - r, false)) >= β) {
-							tt.store(key, d, Bound.lower, false, toHash(s), toHash(v), h.move[0]);
-							return s;
-						}
+						if (d < 10 ||  (s = αβ(β - 1, β, d - r, false)) >= β) return s;
 					}
 					isSafe = (s > -Score.big);
 				}
@@ -562,10 +566,10 @@ private:
 
 			// singular move
 			if (d >= 8 && m == h.move[0] && !excludeMove && h.depth >= d - 4 && h.bound != Bound.upper) {
-				e = h.singular && h.depth >= d;
-				r = max(4, 2 + d / 4);
+				e = (h.singular && h.depth >= d);
 				if (e == 0) {
 					const int λ = h.score - 2 * d - 1;
+					r = max(4, 2 + d / 4);
 					if (λ >= -Score.big) {
 						s = αβ(λ, λ + 1, d - r, false, m);
 						e = (s <= λ);
@@ -717,7 +721,7 @@ private:
 
 	/* check if search must continue */
 	bool persist(const int d) const {
-		return (option.isPondering || search.time < 0.7 * option.time.max)
+		return (option.isPondering || (id > 0 || search.time < 0.7 * option.time.max))
 		    && !stop && d <= option.depth.end
 		    && (option.multiPv > 1 || (info.score[0] <= Score.mate - (d - 4) && info.score[0] >= (d - 4) - Score.mate));
 	}
@@ -730,6 +734,7 @@ private:
 	// iterative deepening
 	void iterate() {
 		int d;
+		if (search.message) search.message.log("smp > task[", id, "] option ", option);
 		for (d = option.depth.begin; persist(d); ++d) {
 			if (id > 0 && d < option.depth.end && (id + d) % 4 == 0) continue;
 			multiPv(option.multiPv, d);
@@ -769,6 +774,13 @@ private:
 		if (search.message) search.message.log("smp> task[", id, "] launched");
 		thread = new Thread((){iterate();});
 		thread.start();
+
+		if (option.cpu.affinity.step) {
+			int cpu = id * option.cpu.affinity.step + option.cpu.affinity.offset;
+			if (cpu >= option.cpu.max) cpu = cpu % option.cpu.max + (cpu / option.cpu.max) % option.cpu.affinity.step;
+			if (cpu < option.cpu.max) thread.setAffinity(cpu);
+			if (search.message) search.message.log("smp> thread ", id, " associated to cpu ", cpu);
+		}
 	}
 
 	/* stop the search */
@@ -904,7 +916,6 @@ struct Search {
 			// make the tasks search and wait for its termination
 			foreach (ref t; tasks) t.go(moves);
 			while (keepSearching()) Thread.sleep(1.msecs);
-			if (message) message.log("smp> search terminated");
 
 			// terminate the tasks
 			foreach (ref t; tasks) {
@@ -920,20 +931,35 @@ struct Search {
 	/* go search without aspiration window nor iterative deepening */
 	void go(const int d) {
 		timer.start();
-			option.doPrune = true;
 			master.setup();
-			master.info.score[0] = master.αβ(2 - Score.mate, Score.mate - 1, d, option.doPrune);
+			master.option.doPrune = true;
+			master.info.score[0] = master.αβ(2 - Score.mate, Score.mate - 1, d, master.option.doPrune);
 		timer.stop();
 	}
 
 	/* get the best move */
-	Move bestMove() @property {
+	Move bestMove() const @property {
 		return master.rootMoves[0];
 	}
 
 	/* get the opponent expected move */
-	Move hint() const @property {
-		return master.info.pv[0].n > 1 ? master.info.pv[0].move[1] : 0;
+	Move hint() @property {
+		Entry h;
+		Move m;
+		// seek opponent move from the pv
+		if (master.info.pv[0].n > 1) m = master.info.pv[0].move[1];
+		// else from the tt
+		else if (!timer.on) { // only if search is not running
+			Board b = master.board;
+			if (b.isLegal(bestMove)) {
+				b.update(bestMove);
+					tt.probe(b.key, h);
+					if (b.isLegal(h.move[0])) m = h.move[0];
+				b.restore(bestMove);
+			}
+		}
+
+		return m;
 	}
 
 	/* get the last evaluated score */
