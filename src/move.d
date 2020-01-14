@@ -1,7 +1,7 @@
 /*
  * File move.d
  * move, list of moves & sequence of moves.
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 module move;
@@ -281,7 +281,8 @@ private:
 				if (i.value == -vPiece[Piece.pawn]) {
 					if (board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
 					else i.value = to7thRankBonus; // push to 7
-				}						}
+				}						
+			}
 		}
 		insertionSort(item[o .. n]);
 		item[n] = MoveItem.init;
