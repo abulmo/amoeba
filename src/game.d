@@ -1,7 +1,7 @@
 /*
  * File game.d
  * PGN game reader / writer
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 import board, move, util;
@@ -183,12 +183,13 @@ private:
 
 			if (s == "book") i.book = true;
 			else {
-				if (formattedRead(s, "%s/%s %s",&score, &depth, &time) == 3) {
-				} else if (s[1] == 'M') {
-					s = s[2 .. $];
-					if (formattedRead(s, "%s/%s %s",&matein, &depth, &time) == 3) {
+				try {
+					if (s[1] == 'M') {
+						formattedRead(s[2 .. $], "%s/%s %s",&matein, &depth, &time);
 						if (s[0] == '-') matein = -matein;
-					} else return i;
+					} else formattedRead(s, "%s/%s %s",&score, &depth, &time);
+				} catch (Exception e) {
+					return i;
 				}
 				if (matein > 0) i.score = cast (short) (Score.mate - matein);
 				else if (matein < 0) i.score = cast (short) (matein - Score.mate);
@@ -252,7 +253,7 @@ public:
 		if (isOpening) foreach(i; infos) i.book = true;
 	}
 
-	/* copy constructor */
+	/* constructor */
 	this(ref Reader reader) {
 		this.read(reader);
 	}
@@ -269,6 +270,11 @@ public:
 	void push(const Move m, const Info i = Info.init) {
 		moves ~= m;
 		infos ~= i;
+	}
+
+	/* append a line */
+	void push(const Line l) {
+		foreach(m; l.move) push(m);
 	}
 
 	/* append a tag */
