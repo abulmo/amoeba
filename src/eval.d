@@ -1,7 +1,7 @@
 /*
  * File eval.d
  * Evaluation function
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 module eval;
@@ -29,7 +29,13 @@ struct Value {
 		return r;
 	}
 
-	/* operator overloading: a + v, b * v; apply the operator to each member data */
+	/* operator overloading: +/-a , +/-b; apply the unary operator to each member data */
+	Value opUnary(string op)() const {
+		Value r = {mixin(op ~ "opening"), mixin(op ~ "endgame")};
+		return r;
+	}
+
+	/* operator overloading: +/-v; apply the operator to each member data */
 	Value opBinary(string op)(const double v) const {
 		Value r = {cast (int) mixin("(opening " ~ op ~ " v)"), cast (int) mixin("(endgame " ~ op ~ " v)")};
 		return r;
@@ -101,7 +107,7 @@ private:
 	struct Barycenter {
 		int r, f, n;
 		Square square() @property const {
-			return n ? toSquare(r / n, f / n) : Square.none;
+			return n ? toSquare(f / n, r / n) : Square.none;
 		}
 		void set(const Square x) {
 			r += x.rank;
@@ -112,6 +118,11 @@ private:
 			r -= x.rank;
 			f -= x.file;
 			--n;
+		}
+
+		void deplace(const Square from, const Square to) {
+			r += to.rank - from.rank;
+			f += to.file - from.file;
 		}
 	}
 
@@ -126,9 +137,9 @@ private:
 	}
 
 	/* Pawn Entry of the pawn hash */
-	struct PawnEntry {
-		ulong code;
-		Value [Color.size] value;
+	struct Entry {
+		uint code;
+		Value value;
 	}
 
 	static immutable int [Piece.size] stageValue = [0, 0, 3, 3, 5, 10, 0];
@@ -179,7 +190,7 @@ private:
 	ulong [Color.size] attackByPlayer;
 	ulong [Color.size] promotable;
 	ulong pins;
-	PawnEntry [] pawnTable;
+	Entry [] pawnTable;
 	int ply;
 
 	/* compute the attractive force of a target square x to a distant square y */
@@ -256,6 +267,7 @@ private:
 		Stack *s = &stack[ply];
 		s.value[c] -= coeff.positional[p][forward(from, c)];
 		s.value[c] += coeff.positional[p][forward(to, c)];
+		if (p == Piece.pawn) s.pawnCenter.deplace(from, to); 
 	}
 
 	/* update material imbalance after capturing an enemy's piece or promoting to a player's piece */
@@ -490,16 +502,13 @@ private:
 	}
 
 	/* pawn structure with cache */
-	Value pawnStructure(const Board b) const {
-		const Color player = b.player;
-		const Color enemy = opponent(player);
-		PawnEntry h = pawnTable[b.pawnKey & (pawnTable.length - 1)];
-		if (h.code != b.pawnKey) {
-			h.code = b.pawnKey;
-			h.value[player] = pawnStructure(b, player);
-			h.value[enemy]  = pawnStructure(b, enemy);
+	Value pawnStructure(const Board b) {
+		Entry *h = &pawnTable[b.pawnKey.index(pawnTable.length - 1)];
+		if (h.code != b.pawnKey.code) {
+			h.code = b.pawnKey.code;
+			h.value = pawnStructure(b, Color.white) - pawnStructure(b, Color.black);
 		}
-		return h.value[player] - h.value[enemy];
+		return b.player == Color.white ? h.value : -h.value;
 	}
 
 	/* bishop structure */
@@ -615,7 +624,7 @@ private:
 public:
 	/* clear (the pawn hashtable) */
 	void clear() {
-		pawnTable[] = PawnEntry.init;
+		pawnTable[] = Entry.init;
 	}
 
 	/* set evaluation weights */
@@ -772,13 +781,13 @@ public:
 
 	/* resize the pawn hash table */
 	void resize(size_t size) {
-		pawnTable.length = 1 << lastBit(size / PawnEntry.sizeof);
+		pawnTable.length = 1 << lastBit(size / Entry.sizeof);
 		clear();
 	}
 
 	/* get the size of the pawn hash table */
 	size_t size() const {
-		return pawnTable.length * PawnEntry.sizeof;
+		return pawnTable.length * Entry.sizeof;
 	}
 
 	/* Constructor (initialize evaluation weights & allocate pawnhash table) */
