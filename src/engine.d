@@ -2,7 +2,7 @@
  * File engine.d
  * Manage a UCI Engine through pipes
  *
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
   */
 
 module engine;
@@ -64,7 +64,6 @@ private:
 		value = clamp(value, m, M);
 		if (value != d) send("setoption name ", name, " value ", value);
 	}
-
 
 public:
 	string name;
