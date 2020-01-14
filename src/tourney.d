@@ -2,7 +2,7 @@
  * File tourney.d
  * Organise a match beween two programs using UCI protocol
  * Play it until one program is found stronger than the other using the sprt approach.
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 import util, board, move, engine, game;
@@ -114,6 +114,12 @@ private:
 	}
 }
 
+/* convert a result to a score 0 1 2 */
+int resultToScore(const Result r) {
+	if (r == Result.whiteWin || r == Result.blackLossOnTime || r == Result.blackIllegalMove) return 2;
+	else if (r == Result.blackWin || r == Result.whiteLossOnTime || r == Result.whiteIllegalMove) return 0;
+	else return 1;
+}
 
 
 /*
@@ -185,9 +191,7 @@ class Match {
 		}
 		game.push("TimeControl", time.toString());
 
-		if (r == Result.whiteWin || r == Result.blackLossOnTime || r == Result.blackIllegalMove) return 2;
-		else if (r == Result.blackWin || r == Result.whiteLossOnTime || r == Result.whiteIllegalMove) return 0;
-		else return 1;
+		return resultToScore(r);
 	}
 }
 
@@ -332,15 +336,17 @@ public:
 	int stop(const Var v) {
 		int end = 0;
 
-		if (v & Var.pentanomial) {
-			send("Using variance of the pentanomial distribution of game pairs:");
-			end = LLR(var5());
-		}
+		if (w + d + l > 0) {
+			if (v & Var.pentanomial) {
+				send("Using variance of the pentanomial distribution of game pairs:");
+				end = LLR(var5());
+			}
 
-		if (v & Var.trinomial) {
-			send("Using variance of the trinomial distribution of single games:");
-			const int e = LLR(var3());
-			if ((v & Var.pentanomial) && (e != end)) end = 0; else end = e;
+			if (v & Var.trinomial) {
+				send("Using variance of the trinomial distribution of single games:");
+				const int e = LLR(var3());
+				if ((v & Var.pentanomial) && (e != end)) end = 0; else end = e;
+			}
 		}
 
 		return end;
@@ -386,7 +392,7 @@ public:
 			else if (ext == "fen" || ext == "epd") openings.read!false(o);
 		}
 		if (openings.length == 0) openings ~= new shared Game;
-		if (outputFile) output.open(outputFile, "w");
+		if (outputFile) output.open(outputFile, "a");
 
 		sprt = SPRT(elo0, elo1, α, β);
 
@@ -409,7 +415,7 @@ public:
 			openings ~= game;
 		}
 		if (openings.length == 0) openings ~= new shared Game;
-		if (outputFile) output.open(outputFile, "w");
+		if (outputFile) output.open(outputFile, "a");
 
 		sprt = SPRT(elo0, elo1, α, β);
 
@@ -433,9 +439,29 @@ public:
 		foreach (ref e; opponent) e.end();
 	}
 
+	/* retrieve played games */
+	void retrieve(string gameFile) {
+		shared GameBase base = new shared GameBase;
+		shared Game g;
+		int s1, s2;
+		base.read(gameFile);
+		while (true) {
+			g = base.next();
+			if (g is null) break;
+			s1 = resultToScore(g.result);
+			g = base.next();
+			if (g is null) break;
+			s2 = resultToScore(g.result);
+			sprt.record([s1, 2 - s2]);
+			openings.next(Loop.on);
+		}
+		output.close();
+		output.open(gameFile, "a");
+	}
+
 	/* loop const parallel thru the games */
 	void loop(const int nGames, const string t, const double m, const Var v) {
-		shared bool done = false;
+		shared bool done = (sprt.stop(v) != 0);
 		time = Time(t);
 		margin = m;
 		foreach (i; taskPool.parallel(iota(nGames))) {
@@ -517,7 +543,7 @@ void simulation(const uint nSimulation, const uint nGames, const double draw, co
 void main(string [] args) {
 	EnginePool engines;
 	int nGames = 30_000, nCpu = 1, nRandom, nSimulation = 0, hashSize = 64, nThreads = 1;
-	bool showVersion, showHelp, showDebug, elo;
+	bool showVersion, showHelp, showDebug, elo, retrieve;
 	string [] engineName, openingFile;
 	string outputFile, var, time="10+0.1";
 	double H0 = -2.0, H1 = 2.0, α = 0.05, β = 0.05, draw = 40.0, white = 10.0, win = 0.0, loss = 0.0, margin = 0.0;
@@ -526,12 +552,13 @@ void main(string [] args) {
 	// read arguments
 	getopt(args, "engine|e", &engineName, "time|t", &time, "margin|m", &margin, "hash", &hashSize, "threads", &nThreads,
 		"book|b", &openingFile, "random|r", &nRandom, "output|o", &outputFile, "games|g", &nGames, "cpu|n", &nCpu,
+		"retrieve", &retrieve,
 		"simulation|s", &nSimulation, "draw|d", &draw, "white", &white,
 		"elo0", &H0, "elo1", &H1, "alpha", &α, "beta", &β, "variance|v", &var,
 		"elo", &elo, "win|w", &win, "loss|l", &loss,
 		"debug", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.7\n© 2017-2019 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.8\n© 2017-2020 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
@@ -544,6 +571,7 @@ void main(string [] args) {
 		writeln("    --book|-b <pgn|epd file> opening book");
 		writeln("    --random|-r depth>       random opening moves up to <depth>");
 		writeln("    --output|-o <pgn file>   save the played games");
+		writeln("    --retrieve               restart a tournament from the output games");
 		writeln("    --games|-g <games>       max number of game pairs to play (default 30000)");
 		writeln("    --cpu|-n <cpu>           number of games to play in parallel (default 1)");
 		writeln("    --elo0  <elo>            H0 hypothesis (default = 0)");
@@ -607,6 +635,7 @@ void main(string [] args) {
 
 		// run the tournament
 		engines.start(showDebug, hashSize, nThreads);
+		if (retrieve) engines.retrieve(outputFile);
 		engines.loop(nGames, time, margin, v);
 		engines.end();
 	}
