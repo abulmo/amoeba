@@ -1,6 +1,7 @@
 /*
- * Postmortem retro-analysis
- * © 2016-2019 Richard Delorme
+ * postmortem.d
+ * Posmortem analysis of a set of games
+ * © 2016-2020 Richard Delorme
  */
 
 module postmortem;
@@ -197,7 +198,7 @@ void main(string [] arg) {
 		return;
 	}
 	if (showVersion) {
-		writeln("Postmortem version 1.1 (c) 2019 - Richard Delorme");
+		writeln("Postmortem version 1.1 (c) 2019-2020 - Richard Delorme");
 	}
 
 	option.time.max = option.time.extra = tMax;
