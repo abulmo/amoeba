@@ -1,7 +1,7 @@
 /*
  * File board.d
  * Chess board representation, move generation, etc.
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 module board;
@@ -190,7 +190,8 @@ struct Key {
 		foreach (p; CPiece.wpawn .. CPiece.size)
 		foreach (x; Square.a1 .. Square.size) square[p][x] = uniform(ulong.min, ulong.max, r);
 		foreach (c; Castling.K .. Castling.size) castling[c] = uniform(ulong.min, ulong.max, r);
-		foreach (x; Square.a4 .. Square.a6) enpassant[x] = uniform(ulong.min, ulong.max, r);
+		foreach (x; Square.a3 .. Square.a4) enpassant[x] = uniform(ulong.min, ulong.max, r);
+		foreach (x; Square.a6 .. Square.a7) enpassant[x] = uniform(ulong.min, ulong.max, r);
 		foreach (c; Color.white .. Color.size) color[c] = uniform(ulong.min, ulong.max, r);
 		play = color[Color.white] ^ color[Color.black];
 	}
@@ -258,14 +259,15 @@ struct Key {
  * Zobrist pawn key
  */
 struct PawnKey {
-	ulong code;
+	ulong zobrist;
 
 	/* set the key from a position */
 	void set(const Board board) {
 		ulong b = board.piece[Piece.pawn] | board.piece[Piece.king];
+		zobrist = 0;
 		while (b) {
 			auto x = popSquare(b);
-			code ^= Key.square[board[x]][x];
+			zobrist ^= Key.square[board[x]][x];
 		}
 	}
 
@@ -274,16 +276,27 @@ struct PawnKey {
 		const CPiece p = board[move.from];
 		const Board.Stack *s = &board.stack[board.ply];
 
-		code = s.pawnKey.code;
+		zobrist = s.pawnKey.zobrist;
 		if (toPiece(p) == Piece.pawn) {
-			code ^= Key.square[p][move.from];
-			if (!move.promotion) code ^= Key.square[p][move.to];
-			if (s.enpassant == move.to) code ^= Key.square[opponent(p)][toSquare(file(move.to), rank(move.from))];
+			zobrist ^= Key.square[p][move.from];
+			if (!move.promotion) zobrist ^= Key.square[p][move.to];
+			if (s.enpassant == move.to) zobrist ^= Key.square[opponent(p)][toSquare(file(move.to), rank(move.from))];
 		} else if (toPiece(p) == Piece.king) {
-			code ^= Key.square[p][move.from] ^ Key.square[p][move.to];
+			zobrist ^= Key.square[p][move.from] ^ Key.square[p][move.to];
 		}
-		if (toPiece(board[move.to]) == Piece.pawn) code ^= Key.square[board[move.to]][move.from];
+		if (toPiece(board[move.to]) == Piece.pawn) zobrist ^= Key.square[board[move.to]][move.to];
 	}
+
+	/* index */
+	size_t index(const size_t mask) const {
+		return cast (size_t) (zobrist & mask);
+	}
+
+	/* code */
+	uint code() const @property {
+		return cast (uint) (zobrist >> 32);
+	}
+
 }
 
 /*
@@ -1027,8 +1040,8 @@ public:
 	}
 
 	/* zobrist pawn key */
-	ulong pawnKey() const @property {
-		 return stack[ply].pawnKey.code;
+	PawnKey pawnKey() const @property {
+		 return stack[ply].pawnKey;
 	}
 
 	/* return true if a position is a draw */
