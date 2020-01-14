@@ -1,17 +1,17 @@
 /*
  * File uci.d
  * Universal Chess Interface.
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 module uci;
 
 import board, eval, move, search, util;
-import std.algorithm, std.array, std.conv, std.concurrency, std.stdio, std.string;
+import std.algorithm, std.array, std.conv, std.concurrency, std.parallelism, std.stdio, std.string;
 import core.thread;
 
 /* version */
-enum string versionNumber = "3.0";
+enum string versionNumber = "3.1";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -53,22 +53,40 @@ class Uci {
 	Moves moves;
 	util.Message message;
 	Time [Color.size] time;
-	int depthMax, movesToGo, multipv;
+	int forcedDepth = -1, depthMax, movesToGo, multipv;
+	double forcedTime = 0.0;
 	ulong nodesMax;
+	size_t hashSize = 64;
+	int nThreads = 1;
 	bool canPonder, isPondering, infiniteSearch, easy;
+	string affinity;
 
 	/* constructor */
-	this(const bool dbg = false) {
+	this(const bool dbg = false, const bool useBook = false) {
 		name = "Amoeba " ~ versionNumber ~ '.' ~ arch;
 		message = new util.Message(name);
 		if (dbg) message.logOn();
 		board = new Board;
-		search = Search(67_108_864, 1, message);
+		search = Search(hashSize.MBytes, 1, message);
 		ucinewgame();
 		canPonder = false;
 		search.option.verbose = true;
 		multipv = 1;
 		easy = true;
+		affinity = "0:0";
+	}
+
+	/* set Hash Size */
+	void resize(const size_t s) {
+		const size_t hashSize = clamp(s, 1, 4096 * Entry.sizeof);
+		search.resize(hashSize.MBytes);
+	}
+
+	/* set number of threads */
+	void threads(const int t) {
+		const int nThreads = clamp(t, 1, 256);
+		search.threads(nThreads);
+		search.position(board);
 	}
 
 	/* set thinking time */
@@ -109,8 +127,9 @@ class Uci {
 		message.send("id name " ~ name);
 		message.send("id author Richard Delorme");
 		message.send("option name Ponder type check default false");
-		message.send("option name Hash type spin default 64 min 1 max ", 4096 * Entry.sizeof);
-		message.send("option name Threads type spin default 1 min 1 max 256");
+		message.send("option name Hash type spin default ", hashSize, " min 1 max ", 4096 * Entry.sizeof);
+		message.send("option name Threads type spin default ", nThreads, " min 1 max 256");
+		message.send("option name Affinity type string default ", affinity);
 		message.send("option name Log type check default ", message.isLogging());
 		message.send("option name MultiPV type spin default 1 min 1 max 256");
 		message.send("option name UCI_AnalyseMode type check default false");
@@ -124,16 +143,16 @@ class Uci {
 		findSkip(line, "value");
 		string value = line.strip().toLower();
 		if (option == "ponder") canPonder = to!bool(value);
-		else if (option == "hash") search.resize(clamp(to!size_t(value), 1, 4096 * Entry.sizeof) * 1024 * 1024);
-		else if (option == "threads") {
-			search.threads(clamp(to!int(value), 1, 255));
-			search.position(board);
-		} else if (option == "multipv") multipv = clamp(to!int(value), 1, 256);
+		else if (option == "hash") resize(to!size_t(value));
+		else if (option == "threads") threads(to!int(value));
+		else if (option == "multipv") multipv = clamp(to!int(value), 1, 256);
 		else if (option == "uci_analysemode") easy = !to!bool(value);
+		else if (option == "affinity") affinity = value;
 		else if (option == "log") {
 			if (to!bool(value)) message.logOn();
 			else message.logOff();
 		}
+		else message.send("info error ", option, " is not a known option");
 			
 	}
 
@@ -150,7 +169,11 @@ class Uci {
 		else if (findSkip(line, "fen")) board.set(line);
 		if (findSkip(line, "moves")) {
 			auto words = line.split();
-			foreach(w ; words) board.update(fromPan(w));
+			foreach(w ; words) {
+				Move m = fromPan(w);
+				if (board.isLegal(m)) board.update(fromPan(w));
+				else message.send("info error ", w, " is not a legal move");
+			}
 		}
 		search.position(board);
 	}
@@ -165,7 +188,8 @@ class Uci {
 
 	/* set bestmove */
 	void bestmove() {
-		if (search.hint != 0 && canPonder) message.send("bestmove ", search.bestMove.toPan(), " ponder ", search.hint.toPan());
+		Move hint = search.hint;
+		if (hint != 0 && canPonder) message.send("bestmove ", search.bestMove.toPan(), " ponder ", hint.toPan());
 		else message.send("bestmove ", search.bestMove.toPan());
 	}
 
@@ -203,6 +227,15 @@ class Uci {
 		option.isPondering = isPondering;
 		option.doPrune = doPrune;
 		option.verbose = true;
+		option.cpu.max = totalCPUs;
+		writeln("affinity = ", affinity);
+		option.cpu.affinity.set(affinity);
+		// option overriding from the commandline
+		if (forcedDepth >= 0) option.depth.end = forcedDepth;
+		if (forcedTime > 0.0) {
+			time[board.player].clear();
+			time[board.player].increment = 0.001 * forcedTime;
+		}
 
 		search.go(option, moves);
 		if (!isPondering && !infiniteSearch) bestmove();
@@ -231,6 +264,11 @@ class Uci {
 			// unused
 			else if (findSkip(line, "debug")) {}
 			else if (findSkip(line, "register")) {}
+			// xboard
+			else if (findSkip(line, "xboard")) {
+				message.send("tellusererror ", name, " only supports the UCI protocol");
+				break;
+			}
 			// error
 			else message.log("error unknown command: '%s'", line);
 		}
