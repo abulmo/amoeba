@@ -1,18 +1,12 @@
 /*
  * Tune the evaluation function
- * © 2016-2019 Richard Delorme
+ * © 2016-2020 Richard Delorme
  */
 
 module tune;
 import board, eval, game, move, search, util, weight;
 import std.algorithm, std.concurrency, std.getopt, std.math, std.stdio;
-import core.atomic, core.thread;
-
-version (GNU) {
-} else {
-	pragma(msg, "Please, compile me with GDC");
-	static assert(0);
-}
+import core.thread;
 
 /*
  * Vector  (as in Mathematics)
@@ -134,10 +128,10 @@ struct Sum {
 		} else assert(0);
 	}
 
-	void opOpAssign(string op)(const ref Sum v) shared {
+	void opOpAssign(string op)(const ref Sum v) {
 		static if (op == "+") {
-			atomicOp!"+="(this.error, v.error);
-			atomicOp!"+="(this.n, v.n);
+			error += v.error;
+			n += v.n;
 		} else assert(0);
 	}
 }
@@ -160,7 +154,7 @@ double result(const Color c, const shared Game game) {
 enum ErrorType {absolute, square, logLikelihood}
 
 /* compute the error for a single thread */
-void getPartialError(const int id, shared GameBase games, const double [] weights, const double K, shared Sum *sum, const ErrorType errorType) {
+void getPartialError(const int id, shared GameBase games, const double [] weights, const double K, Sum *sum, const ErrorType errorType) {
 	double r, s;
 	shared Game game;
 	Sum part = Sum.init;
@@ -201,6 +195,11 @@ void getPartialError(const int id, shared GameBase games, const double [] weight
 			}
 		}
 	}
+
+	destroy(board);
+	destroy(search.eval);
+	destroy(search.tt);
+
 	synchronized {
 		*sum += part;
 	}
@@ -260,12 +259,18 @@ class Amoeba {
 	/* compute the error from a vector */
 	double getError(const ref Vector v) {
 		v.get(weights, isTunable);
-		shared Sum sum = Sum.init;
+		Sum sum = Sum.init;
 		immutable double [] w = weights.idup;
 		games.clear();
+		Thread [] thread;
 
-		foreach (i; 0 .. nCpu) spawn(&getPartialError, i, games, w, K, &sum, errorType);
+		thread.length = nCpu;
+		foreach (i; 0 .. nCpu) {
+			thread[i] = new Thread ((){getPartialError(i, games, w, K, &sum, errorType);});
+			thread[i].start();
+		}
 		thread_joinAll();
+		foreach (ref t; thread) destroy(t);
 
 		++iter;
 		nBoard = sum.n;
@@ -339,7 +344,7 @@ class Amoeba {
 		f.writeln("/*");
 		f.writeln(" * File weight.d");
 		f.writeln(" * Evaluation weight - automatically generated");
-		f.writeln(" * © 2016-2019 Richard Delorme");
+		f.writeln(" * © 2016-2020 Richard Delorme");
 		f.writeln(" */");
 		f.writeln("");
 		f.writeln("static immutable double [] initialWeights = [");
