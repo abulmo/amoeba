@@ -41,7 +41,7 @@ void main(string[] args) {
 		"along with this program.  If not, see <http://www.gnu.org/licenses/>.\n";
 
 	void start() {
-		uci = new Uci(dbg, book);
+		uci = new Uci(dbg);
 		if (depth > -1) uci.forcedDepth = depth;
 		if (time > 0.0) uci.forcedTime = time;
 		uci.resize(hashSize);
