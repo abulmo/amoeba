@@ -307,11 +307,13 @@ version (linux) {
 		if (pthread_setaffinity_np(thread.id, cpuset.sizeof, &cpuset) != 0) throw new Exception("cannot set affinity");
 
 	}
-
-} else version (windows) {
+} else version (Windows) {
+	import core.sys.windows.windows;
 
 	void setAffinity(Thread thread, const size_t cpu) {
-		stderr.writeln(__FUNCTION__, " not implemented");
+		HANDLE h = OpenThread(THREAD_ALL_ACCESS, TRUE, thread.id);
+		SetThreadIdealProcessor(h, cast (uint) cpu);
+		CloseHandle(h);
 	}
 
 } else {
