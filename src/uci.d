@@ -62,7 +62,7 @@ class Uci {
 	string affinity;
 
 	/* constructor */
-	this(const bool dbg = false, const bool useBook = false) {
+	this(const bool dbg = false) {
 		name = "Amoeba " ~ versionNumber ~ '.' ~ arch;
 		message = new util.Message(name);
 		if (dbg) message.logOn();
@@ -228,7 +228,6 @@ class Uci {
 		option.doPrune = doPrune;
 		option.verbose = true;
 		option.cpu.max = totalCPUs;
-		writeln("affinity = ", affinity);
 		option.cpu.affinity.set(affinity);
 		// option overriding from the commandline
 		if (forcedDepth >= 0) option.depth.end = forcedDepth;
