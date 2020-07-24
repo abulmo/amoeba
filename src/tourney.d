@@ -63,7 +63,7 @@ private:
 		movesPerPeriod = to!int(mpp);
 		increment = convert(i);
 		writeln("Time settings: base: ", base, " s; period: ", movesPerPeriod, " moves,  inc: ", increment, " s");
-		availableTime = [base, base];
+		availableTime = [base + increment, base + increment];
 		movesToGo = movesPerPeriod;
 	}
 
@@ -166,7 +166,7 @@ class Match {
 				r = [Result.whiteIllegalMove, Result.blackIllegalMove][b.player];
 				break;
 			}
-			game.push(m, engine[b.player].info);
+			game.push(m, engine[b.player].info.get());
 			if (!time.update(b.player, chrono.time, margin)) {
 				writefln("%s loses on time", engine[b.player].name);
 				r = [Result.whiteLossOnTime, Result.blackLossOnTime][b.player];
@@ -558,7 +558,7 @@ void main(string [] args) {
 		"elo", &elo, "win|w", &win, "loss|l", &loss,
 		"debug", &showDebug, "help|h", &showHelp, "version", &showVersion);
 
-	if (showVersion) writeln("tourney version 1.8\n© 2017-2020 Richard Delorme");
+	if (showVersion) writeln("tourney version 1.9\n© 2017-2020 Richard Delorme");
 
 	if (showHelp) {
 		writeln("\nRun a tournament between two UCI engines using Sequential Probability Ratio Test as stopping condition.");
