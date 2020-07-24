@@ -7,7 +7,7 @@
 module move;
 
 import board, util;
-import std.stdio, std.ascii, std.format, std.string, std.algorithm, core.stdc.stdlib;
+import std.stdio, std.array, std.ascii, std.format,  std.math, std.string, std.algorithm;
 
 /*
  * Move
@@ -51,104 +51,111 @@ Move fromPan(string s) {
 	return cast (Move) (from | to << 6 | promotion << 12);
 }
 
-version (withGameSupport) {
-	/* convert a string using standard algebraic notation (SAN) into a move */
-	Move fromSan(string s, const Board b) {
-		int i, r = -1, f = -1;
-		Square from, to;
-		Piece promotion = Piece.none;
-		Move move;
-		Piece p;
-		bool isCapture;
+/* convert a string using standard algebraic notation (SAN) into a move */
+Move fromSan(string s, const Board b) {
+	int i, r = -1, f = -1;
+	Square from, to;
+	Piece promotion = Piece.none;
+	Move move;
+	Piece p;
+	bool isCapture;
 
-		bool hasString(string t) {return  s.length >= t.length && s[0 .. t.length] == t; }
-		bool hasChar(const int j, char c) { return j < s.length && s[j] == c; }
-		bool hasAlpha(const int j) { return j < s.length && isAlpha(s[j]); }
-		bool hasDigit(const int j) { return j < s.length && isDigit(s[j]); }
+	bool hasString(string t) {return  s.length >= t.length && s[0 .. t.length] == t; }
+	bool hasChar(const int j, char c) { return j < s.length && s[j] == c; }
+	bool hasAlpha(const int j) { return j < s.length && isAlpha(s[j]); }
+	bool hasDigit(const int j) { return j < s.length && isDigit(s[j]); }
 
-		if (hasString("O-O-O") || hasString("0-0-0")) {
-			from = b.xKing[b.player];
-			to = cast (Square) (from - 2);
-			move = toMove(from, to);
-		} else if (hasString("O-O") || hasString("0-0")) {
-			from = b.xKing[b.player];
-			to = cast (Square) (from + 2);
-			move = toMove(from, to);
+	if (hasString("O-O-O") || hasString("0-0-0")) {
+		from = b.xKing[b.player];
+		to = cast (Square) (from - 2);
+		move = toMove(from, to);
+	} else if (hasString("O-O") || hasString("0-0")) {
+		from = b.xKing[b.player];
+		to = cast (Square) (from + 2);
+		move = toMove(from, to);
+	} else {
+		if (isUpper(s[i])) p = toPiece(s[i++]);
+		else p = Piece.pawn;
+		isCapture = true;
+		if (hasChar(i, 'x')) ++i;
+		else if (hasChar(i + 1, 'x')) {
+			if (hasAlpha(i)) f = s[i] - 'a';
+			else if (hasDigit(i)) r = s[i] - '1';
+			i += 2;
+		} else if (hasChar(i + 2, 'x')) {
+			if (hasAlpha(i)) f = s[i] - 'a';
+			if (hasDigit(i + 1)) r = s[i + 1] - '1';
+			i += 3;
 		} else {
-			if (isUpper(s[i])) p = toPiece(s[i++]);
-			else p = Piece.pawn;
-			isCapture = true;
-			if (hasChar(i, 'x')) ++i;
-			else if (hasChar(i + 1, 'x')) {
+			isCapture = false;
+			if (hasAlpha(i + 1)) {
 				if (hasAlpha(i)) f = s[i] - 'a';
 				else if (hasDigit(i)) r = s[i] - '1';
-				i += 2;
-			} else if (hasChar(i + 2, 'x')) {
+				i += 1;
+			} else if (hasAlpha(i + 2) && hasDigit(i + 3)) {
 				if (hasAlpha(i)) f = s[i] - 'a';
 				if (hasDigit(i + 1)) r = s[i + 1] - '1';
-				i += 3;
-			} else {
-				isCapture = false;
-				if (hasAlpha(i + 1)) {
-					if (hasAlpha(i)) f = s[i] - 'a';
-					else if (hasDigit(i)) r = s[i] - '1';
-					i += 1;
-				} else if (hasAlpha(i + 2) && hasDigit(i + 3)) {
-					if (hasAlpha(i)) f = s[i] - 'a';
-					if (hasDigit(i + 1)) r = s[i + 1] - '1';
-					i += 2;
-				}
-			}
-			to = toSquare(s[i..i+2]); i += 2;
-			if (hasChar(i, '=')) {
-				promotion = toPiece(s[i + 1]);
 				i += 2;
 			}
 		}
-
-		if (move == 0) move = b.guess(p, to, f, r, promotion, isCapture);
-
-		if (b.isLegal(move)) return move;
-
-		throw new Exception("Bad SAN : '" ~ s ~ "' -> " ~ toPan(move));
+		to = toSquare(s[i..i+2]); i += 2;
+		if (hasChar(i, '=')) {
+			promotion = toPiece(s[i + 1]);
+			i += 2;
+		}
 	}
 
-	/* convert a move to a string using Standard Algebraic Notation (SAN) */
-	string toSan(const Move move, Board board) {
-		string f = "abcdefgh", r = "12345678", s;
-		int nSameFile, nSameTo;
-		Moves moves = void;
-		const Piece p = toPiece(board[move.from]);
+	if (move == 0) move = b.guess(p, to, f, r, promotion, isCapture);
 
-		if (move == 0) s = "@@@@";
-		else if (p == Piece.king && move.to == move.from + 2) s = "O-O";
-		else if (p == Piece.king && move.to == move.from - 2) s = "O-O-O";
-		else {
-			if (p != Piece.pawn) {
-				moves.generate(board);
-				foreach (m; moves) {
-					if (move.to == m.to && p == toPiece(board[m.from]) && move.from != m.from) {
-						++nSameTo;
-						if (file(move.from) == file(m.from)) ++nSameFile;
-					}
+	if (b.isLegal(move)) return move;
+
+	move = fromPan(s);
+
+	if (b.isLegal(move)) {
+		stderr.writeln("warning: expected SAN instead of PAN '", s, "'");
+		return move;
+	} else {
+		stderr.writeln("error: bad SAN '", s, "' -> ", toPan(move));
+	}
+
+	return 0;
+}
+
+/* convert a move to a string using Standard Algebraic Notation (SAN) */
+string toSan(const Move move, Board board) {
+	string f = "abcdefgh", r = "12345678", s;
+	int nSameFile, nSameTo;
+	Moves moves = void;
+	const Piece p = toPiece(board[move.from]);
+
+	if (move == 0) s = "@@@@";
+	else if (p == Piece.king && move.to == move.from + 2) s = "O-O";
+	else if (p == Piece.king && move.to == move.from - 2) s = "O-O-O";
+	else {
+		if (p != Piece.pawn) {
+			moves.generate(board);
+			foreach (m; moves) {
+				if (move.to == m.to && p == toPiece(board[m.from]) && move.from != m.from) {
+					++nSameTo;
+					if (file(move.from) == file(m.from)) ++nSameFile;
 				}
-				s ~= p.toChar();
 			}
-			if ((p == Piece.pawn && file(move.from) != file(move.to)) || nSameTo > nSameFile) s ~= f[file(move.from)];
-			if (nSameFile) s ~= r[rank(move.from)];
-			if ((p == Piece.pawn && file(move.from) != file(move.to)) || board[move.to]) s ~= 'x';
-			s ~= f[file(move.to)]; s ~= r[rank(move.to)];
-			if (move.promotion) s ~= "=" ~ toChar(move.promotion);
+			s ~= p.toChar();
 		}
-
-		if (board.giveCheck(move)) {
-			board.update(move);
-				moves.generate(board);
-				if (moves.length) s ~= '+'; else s ~= '#';
-			board.restore(move);
-		}
-		return s;
+		if ((p == Piece.pawn && file(move.from) != file(move.to)) || nSameTo > nSameFile) s ~= f[file(move.from)];
+		if (nSameFile) s ~= r[rank(move.from)];
+		if ((p == Piece.pawn && file(move.from) != file(move.to)) || board[move.to]) s ~= 'x';
+		s ~= f[file(move.to)]; s ~= r[rank(move.to)];
+		if (move.promotion) s ~= "=" ~ toChar(move.promotion);
 	}
+
+	if (board.giveCheck(move)) {
+		board.update(move);
+			moves.generate(board);
+			if (moves.length) s ~= '+'; else s ~= '#';
+		board.restore(move);
+	}
+	return s;
 }
 
 /*
@@ -192,6 +199,10 @@ struct History {
 		else return cast (short) ((g * max) / (g + b) - max);
 	}
 
+	/* return the history score */
+	bool isGood(const CPiece p, const Square to) const {
+		return goodMoves[p][to] > badMoves[p][to];
+	}
 }
 
 /*
@@ -206,21 +217,23 @@ struct MoveItem {
 		move = m;
 		value = v;
 	}
+
+	/* toString */
+	string toString(Board b) {
+		return "(" ~ (b ? move.toSan(b) : move.toPan()) ~ ", " ~ format("%d", value) ~ ")";
+	 }
 }
 
 /* insertion Sort */
 void insertionSort(MoveItem [] items) {
 	const size_t n = items.length;
-
-	if (n > 1) {
-		foreach (i; 1 .. n) {
-			size_t j;
-			const tmp = items[i];
-			for (j = i ; j > 0 && tmp.value > items[j - 1].value; j--) {
-				items[j] = items[j - 1];
-			}
-			items[j] = tmp;
+	foreach (i; 1 .. n) {
+		size_t j;
+		const tmp = items[i];
+		for (j = i ; j > 0 && tmp.value > items[j - 1].value; j--) {
+			items[j] = items[j - 1];
 		}
+		items[j] = tmp;
 	}
 }
 
@@ -244,11 +257,15 @@ private:
 	static immutable short [Piece.size] vPiece = [0, 1, 2, 3, 4, 5, 6];
 	static immutable short [Piece.size] vPromotion = [0, 0, 48, 16, 32, 64, 0];
 	static immutable short [Piece.size] vCapture = [0, 256, 512, 768, 1024, 1280, 1536];
+	static immutable short [Square.size] center = allSquares.map!(cdist).array; 
 	enum short badSeeMalus = -History.max - vCapture[Piece.king];
 	enum short ttBonus = 10_000;
 	enum short killerBonus = 10;
 	enum short to7thRankBonus = 12;
 	enum short doublon = short.min;
+
+	static int dist(const Square x, const Square y) { return abs(rank(x) - rank(y)) + abs(file(x) - file(y)); }
+	static short cdist(const Square x) { with(Square) return cast (short) min(dist(a1, x), dist(a8, x), dist(h1, x), dist(h8, x)); }
 
 	/* insert item j into i */
 	void insert(const size_t i, const size_t j) {
@@ -277,7 +294,7 @@ private:
 			else {
 				auto p = toPiece(board[m.from]);
 				auto victim = toPiece(board[m.to]);
-				i.value = cast (short) (vCapture[victim] + vPromotion[m.promotion] - vPiece[p]);
+				i.value = cast (short) (vCapture[victim] + vPromotion[m.promotion] - vPiece[p] + center[m.to]);
 				if (i.value == -vPiece[Piece.pawn]) {
 					if (board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
 					else i.value = to7thRankBonus; // push to 7
@@ -298,7 +315,7 @@ private:
 			else if (i.move == killer[0]) i.value = doublon;
 			else if (i.move == killer[1]) i.value = doublon;
 			else if (i.move == refutation) i.value = doublon;
-			else i.value = history.value(board[i.move.from], i.move.to);
+			else i.value = cast (short) (history.value(board[i.move.from], i.move.to) + center[i.move.to]);
 		}
 		insertionSort(item[index .. n]);
 		item[n] = MoveItem.init;
@@ -493,7 +510,7 @@ public:
 	}
 
 	/* generate all moves */
-	void generate(Board board) {
+	void generate(const Board board) {
 		index = n = 0;
 		if (board.inCheck) board.generateEvasions(this);
 		else board.generateMoves(this);
@@ -507,7 +524,7 @@ public:
 	}
 
 	/* convert to string using SAN */
-	version (withGameSupport) string toSan(Board board) const {
+	string toSan(Board board) const {
 		string s;
 		foreach (ref i; item[0..n]) s ~= i.move.toSan(board) ~ " ";
 		return s;
@@ -593,7 +610,7 @@ struct Line {
 	}
 
 	/* Convert it to a string */
-	version (withGameSupport) string toSan(Board board) const {
+	string toSan(Board board) const {
 		string s;
 		if (board.player == Color.black) s = format("%d... ", (board.ply + board.plyOffset) / 2 + 1);
 		foreach (m; move[0 .. n]) {
