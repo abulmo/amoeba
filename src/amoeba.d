@@ -5,7 +5,7 @@
 
 module amoeba;
 
-import board, eval, kpk, search, uci;
+import board, kpk, search, uci, util;
 import std.conv, std.stdio;
 
 /* main function */
@@ -17,16 +17,19 @@ void main(string[] args) {
 	size_t hashSize = 64;
 	string affinity = "0:0";
 
-	string help = args[0] ~ "[--debug|-g] | [--help|-h] | [--version|-v]\n" ~
+	string help = args[0] ~ "[command] [options]\n" ~
 		"                           Launch the engine waiting for UCI compatible input\n" ~
+		"    perft <args>           Test move generation correctness & performance\n" ~
+		"    test                   Test move generation correctness\n" ~
+		"    bench <args>           Test search speed from a set of positions\n" ~
 		"    --depth|-d <depth>     Search at depth d\n" ~
 		"    --time|-t <seconds>    Search at fixed time t\n" ~
 		"    --hash|-H <Mb>         Set default HashSize\n" ~
 		"    --cpu|-c <threads>     Set default number of threads\n" ~
 		"    --affinity|-a <[o:]s>  Set cpu affinity as 'offset:step'\n" ~
-		"    --debug|-g           Turn logging to a debug file on by default\n" ~
-		"    --version|-v         Display version number\n" ~
-		"    --help|-h            Display this help\n";
+		"    --debug|-g             Turn logging to a debug file on by default\n" ~
+		"    --version|-v           Display version number\n" ~
+		"    --help|-h              Display this help\n";
 	string ver = "Amoeba " ~ versionNumber ~ "." ~ arch ~ ": an UCI chess engine.\n\n" ~
 		"Copyright © 2016 - 2020 Richard Delorme\n\n" ~
 		"This program is free software: you can redistribute it and/or modify\n" ~
@@ -61,7 +64,12 @@ void main(string[] args) {
 			if (arg == "--affinity" || arg == "-a") affinity = args[i + 1];
 		}
 		if (args.length > 1) {
-			if (args[1] == "--help" || args[1] == "-h") stderr.writeln(help);
+			if (args[1] == "test") board.test();
+			else if (args[1] == "perft") board.perft(args[1 .. $], null);
+			else if (args[1] == "bench") {
+				Search s = Search(hashSize.MBytes, nThreads, null);
+				bench(args[1 .. $], s);
+			} else if (args[1] == "--help" || args[1] == "-h") stderr.writeln(help);
 			else if (args[1] == "--version" || args[1] == "-v") stderr.writeln(ver);
 			else start();
 		} else start();
