@@ -3,9 +3,10 @@
 #
 
 AMOEBA_SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
-TOURNEY_SRC = tourney.d board.d engine.d game.d move.d util.d
+TOURNEY_SRC = tourney.d board.d engine.d game.d move.d search.d eval.d kpk.d util.d
 TUNE_SRC = tune.d util.d board.d eval.d game.d kpk.d move.d search.d weight.d
 POSTMORTEM_SRC = postmortem.d game.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d engine.d
+EPDTEST_SRC = epdtest.d game.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d engine.d
 
 ifeq ($(DC),)
 	DC = ldc2
@@ -16,7 +17,7 @@ ifeq ($(POPCOUNT),)
 endif
 
 ifeq ($(CPU),)
-	CPU=sandybridge
+	CPU=native
 endif
 
 ifeq ($(BUILD),)
@@ -46,7 +47,7 @@ endif
 ifeq ($(DC),ldc2)
 	DFLAGS = -singleobj -w -dw -mcpu=$(CPU) -dip25
 	ifeq ($(BUILD),fast)
-		DFLAGS += -O -release -boundscheck=off -flto=full
+		DFLAGS += -O -release -boundscheck=off -flto=full --frame-pointer=none
 	else ifeq ($(BUILD),debug)
 		DFLAGS = -O -g -gc
 	else ifeq ($(BUILD),perf)
@@ -94,9 +95,6 @@ endif
 #amoeba
 ifeq ($(EXE),amoeba)
 	SRC = $(AMOEBA_SRC)
-#evolve
-else ifeq ($(EXE),evolve)
-	SRC = $(EVOLVE_SRC)
 #tourney
 else ifeq ($(EXE),tourney)
 	SRC = $(TOURNEY_SRC)
@@ -106,6 +104,9 @@ else ifeq ($(EXE),tune)
 #postmortem
 else ifeq ($(EXE),postmortem)
 	SRC = $(POSTMORTEM_SRC)
+#epdtest
+else ifeq ($(EXE),epdtest)
+	SRC = $(EPDTEST_SRC)
 endif
 
 default :
@@ -117,10 +118,11 @@ pgo-gen:
 pgo-use:
 	$(PGO_MERGE)
 	$(DC) $(DFLAGS) $(PGO_USE) $(SRC)
-pgo :
+pgo : $(AMOEBA_SRC)
 	$(MAKE) clean
 	$(MAKE) pgo-gen CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) < bench.uci > /dev/null
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft -d 6
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench -c 4 -d 12
 	$(MAKE) pgo-use CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
 debug : $(AMOEBA_SRC)
@@ -133,20 +135,29 @@ amoeba: $(AMOEBA_SRC)
 	$(MAKE) pgo EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
 tourney: $(TOURNEY_SRC)
-	$(MAKE) EXE=tourney CPU=$(CPU) POPCOUNT=$(POPCOUNT) GAME=true
+	$(MAKE) EXE=tourney CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
 tune: $(TUNE_SRC)
-	$(MAKE) EXE=tune CPU=$(CPU) POPCOUNT=$(POPCOUNT) GAME=true
+	$(MAKE) EXE=tune CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
-pgo-postmortem:
+pgo-postmortem:$(POSTMORTEM_SRC)
 	$(MAKE) clean
-	$(MAKE) pgo-gen EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT) GAME=true
+	$(MAKE) pgo-gen EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 	LLVM_PROFILE_FILE=amoeba-%p.profraw ./postmortem -c 4 -f lasker_vs_herzfeld_1895.pgn -d 10
-	$(MAKE) pgo-use EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT) GAME=true
+	$(MAKE) pgo-use EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+
+pgo-epdtest:$(EPDTEST_SRC)
+	$(MAKE) clean
+	$(MAKE) pgo-gen EXE=epdtest CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./epdtest -e amoeba -c 4 -f bratko-kopec.epd -d 12
+	$(MAKE) pgo-use EXE=epdtest CPU=$(CPU) POPCOUNT=$(POPCOUNT)
 
 postmortem: $(POSTMORTEM_SRC)
-	$(MAKE) EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT)  GAME=true
+	$(MAKE) EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT) 
 
+
+epdtest: $(EPDTEST_SRC)
+	$(MAKE) EXE=epdtest CPU=$(CPU) POPCOUNT=$(POPCOUNT) 
 
 cloc:
 	@echo "Amoeba's engine lines of code"
@@ -157,13 +168,15 @@ cloc:
 	countloc $(TOURNEY_SRC)
 	@echo "Amoeba's game postmortem analyzer"
 	countloc $(POSTMORTEM_SRC)
+	@echo "Amoeba's epd engine tester"
+	countloc $(EPDTEST_SRC)
 
 clean:
 	$(RM) *.o trace.* *.log *.gcda *.profraw *.profdata
 
 cleanall:
 	$(MAKE) clean
-	$(RM) amoeba-* amoeba postmortem tourney tune core.*
+	$(RM) amoeba-* amoeba postmortem tourney tune epdtest core.*
 
 
 
