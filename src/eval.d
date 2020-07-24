@@ -10,7 +10,7 @@ import board, kpk, move, util, weight;
 import std.algorithm, std.conv, std.math, std.stdio;
 
 
-/* 
+/*
  * Value
  */
 struct Value {
@@ -61,11 +61,11 @@ struct Value {
 final class Eval {
 private:
 	/* each possible pawn state */
-	enum PawnState { none = 0, isolated, backward, chained, 
-		candidate, candidateIsolated, candidateBackward, candidateChained, 
-		passed, passedIsolated, passedBackward, passedChained, 
+	enum PawnState { none = 0, isolated, backward, chained,
+		candidate, candidateIsolated, candidateBackward, candidateChained,
+		passed, passedIsolated, passedBackward, passedChained,
 		doubled, doubledIsolated, doubledBackward, doubledChained,
-		doubledCandidate, doubledCandidateIsolated, doubledCandidateBackward, doubledCandidateChained, 
+		doubledCandidate, doubledCandidateIsolated, doubledCandidateBackward, doubledCandidateChained,
 		doubledPassed, doubledPassedIsolated, doubledPassedBackward, doubledPassedChained, size
 	}
 
@@ -178,6 +178,9 @@ private:
 		[0x000210, 0x001000]  // pawn + 2 knights vs bishop
 	];
 
+	static immutable uint [Color.size] KBPk = [0x001010, 0x000000]; // bishop + pawn vs king
+
+
 	enum ε = 170;
 	enum centipawn = 1024;
 	enum halfcentipawn = 512;
@@ -216,11 +219,11 @@ private:
 
 	/* adjust pawn positional coeff, so that min positional = 0 */
 	static void adjustPawn(string phase) (ref Value [Square.size] p) {
-		foreach(x; Square.a1 .. Square.a2) mixin("p[x]."~phase) = 0;
-		foreach(x; Square.a8 .. Square.size) mixin("p[x]."~phase) = 0;
+		foreach (x; Square.a1 .. Square.a2) mixin("p[x]."~phase) = 0;
+		foreach (x; Square.a8 .. Square.size) mixin("p[x]."~phase) = 0;
 		int m = int.max;
-		foreach(x; Square.a2 .. Square.a8) m = min(m, mixin("p[x]."~phase));
-		foreach(x; Square.a2 .. Square.a8) mixin("p[x]."~phase) -= m;
+		foreach (x; Square.a2 .. Square.a8) m = min(m, mixin("p[x]."~phase));
+		foreach (x; Square.a2 .. Square.a8) mixin("p[x]."~phase) -= m;
 	}
 
 	/* Build positional array coeffs from an array of attractive squares */
@@ -239,7 +242,7 @@ private:
 			foreach (x; Square.a1 .. Square.size) p[x] -= m;
 		}
 
-		foreach(x; Square.a1 .. Square.size) mixin("positional[x]."~phase) += scale(p[x]);
+		foreach (x; Square.a1 .. Square.size) mixin("positional[x]."~phase) += scale(p[x]);
 	}
 
 	/* remove a piece */
@@ -267,7 +270,7 @@ private:
 		Stack *s = &stack[ply];
 		s.value[c] -= coeff.positional[p][forward(from, c)];
 		s.value[c] += coeff.positional[p][forward(to, c)];
-		if (p == Piece.pawn) s.pawnCenter.deplace(from, to); 
+		if (p == Piece.pawn) s.pawnCenter.deplace(from, to);
 	}
 
 	/* update material imbalance after capturing an enemy's piece or promoting to a player's piece */
@@ -311,7 +314,7 @@ private:
 	/* compute a bitboard of all squares attacked by a type of piece */
 	void setCoverage(Piece p)(const Board b, const ulong pins) {
 		static assert (p != Piece.pawn);
-		const ulong O = ~b.piece[Piece.none];
+		ulong O = ~b.piece[Piece.none];
 		ulong attacker = b.piece[p] & ~pins;
 
 		while (attacker) {
@@ -337,7 +340,7 @@ private:
 				else if (d == 7)  attackFromSquare[x] = Board.antidiagonalAttack(O, x);
 			}
 			static if (p == Piece.rook || p == Piece.queen) {
-				if (d == 1)  attackFromSquare[x] = Board.rankAttack(O, x);
+				if (d == 1) attackFromSquare[x] = Board.rankAttack(O, x);
 				else if (d == 8) attackFromSquare[x] = Board.fileAttack(O, x);
 			}
 			attackByPiece[cp] |= attackFromSquare[x];
@@ -377,6 +380,11 @@ private:
 		major[Piece.bishop] = major[Piece.knight] = major[Piece.pawn] & ~b.piece[Piece.pawn];
 		major[Piece.queen] = b.piece[Piece.queen] | b.piece[Piece.king];
 		major[Piece.rook] = b.piece[Piece.rook] | major[Piece.queen];
+	}
+
+	void initPromotion(const Board b) {
+		const ulong pawns = b.piece[Piece.pawn];
+		const ulong [Color.size] pawn = [pawns & b.color[0], pawns & b.color[1]];
 
 		promotable[Color.white] = ((pawn[Color.white] & Rank.r2) << 48)
 		                        | ((pawn[Color.white] & Rank.r3) << 40)
@@ -394,7 +402,7 @@ private:
 	}
 
 	/* mobility / attack / defense evaluation components */
-	Value influence(Piece p)(const Board b, const Color player) {
+	Value influence(Piece p)(const Board b, const Color player) const {
 		const Color enemy = opponent(player);
 		const ulong P = b.color[player];
 		const ulong E = b.color[enemy];
@@ -486,7 +494,7 @@ private:
 				if (attacker & b.mask[x].file) state += PawnState.doubled;
 				if ((p[player] & b.mask[x].isolatedPawn) == 0) state += PawnState.isolated;
 				else if ((p[player] & b.mask[x].backwardPawn[player]) == 0) state += PawnState.backward;
-				else if (p[player] & b.mask[x].pawnAttack[enemy]) state += PawnState.chained; 
+				else if (p[player] & b.mask[x].pawnAttack[enemy]) state += PawnState.chained;
 				v += coeff.pawn[state].material + (coeff.pawn[state].positional * coeff.positional[Piece.pawn][forward(x, player)]) / centipawn;
 
 				if (b.mask[x].bit & shield) vShield += attraction(x, k[player]);
@@ -591,6 +599,16 @@ private:
 				 || (d[1] == s.materialIndex[0] && d[0] == s.materialIndex[1])) return value / 16; // TODO; tune
 			}
 
+			// bad bishop
+			if ((KBPk[0] == s.materialIndex[0] && KBPk[1] == s.materialIndex[1])
+			 || (KBPk[1] == s.materialIndex[0] && KBPk[0] == s.materialIndex[1])) {
+				if (b.piece[Piece.pawn] & (board.File.A | board.File.H)) {
+					if ((b.whiteSquares & b.piece[Piece.bishop]) && ((promotable[0]|promotable[1]) & b.blackSquares)) return value / 16;
+					if ((b.blackSquares & b.piece[Piece.bishop]) && ((promotable[0]|promotable[1]) & b.whiteSquares)) return value / 16;
+				}
+			}
+
+
 			if (s.stage == 0) return kpk.rescale(b, value); // king vs king + pawn
 		}
 
@@ -647,31 +665,31 @@ public:
 
 		// opening
 		// material
-		foreach(p; Piece.pawn .. Piece.king) coeff.material[p].opening = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.king) coeff.material[p].opening = scale(w[i++]);
 		coeff.material[Piece.king].opening = 0;
 		coeff.bishopPair.opening = scale(w[i++]);
 		coeff.materialImbalance.opening = scale(w[i++]);
 
 		// mobility
-		coeff.safePawnAdvance.opening   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].safeMobility.opening    = scale(w[i++]);
-		coeff.unsafePawnAdvance.opening = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeMobility.opening  = scale(w[i++]);
-		coeff.safePawnBlock.opening     = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].safeAttack.opening      = scale(w[i++]);
-		coeff.unsafePawnBlock.opening   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeAttack.opening    = scale(w[i++]);
-		coeff.safePawnDouble.opening    = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].safeDefense.opening     = scale(w[i++]);
-		coeff.unsafePawnDouble.opening  = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeDefense.opening   = scale(w[i++]);
+		coeff.safePawnAdvance.opening   = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].safeMobility.opening    = scale(w[i++]);
+		coeff.unsafePawnAdvance.opening = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeMobility.opening  = scale(w[i++]);
+		coeff.safePawnBlock.opening     = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].safeAttack.opening      = scale(w[i++]);
+		coeff.unsafePawnBlock.opening   = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeAttack.opening    = scale(w[i++]);
+		coeff.safePawnDouble.opening    = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].safeDefense.opening     = scale(w[i++]);
+		coeff.unsafePawnDouble.opening  = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeDefense.opening   = scale(w[i++]);
 
 		// hanging & trapped
-		a = w[i++]; b = w[i++]; 
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].hanging.opening = cast (int) (coeff.material[p].opening * a + scale(b));
-		a = w[i++]; b = w[i++]; 
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].trapped.opening = cast (int) (coeff.material[p].opening * a + scale(b));
-		a = w[i++]; b = w[i++]; 
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].enclosed.opening = cast (int) (coeff.material[p].opening * a + scale(b));
+		a = w[i++]; b = w[i++];
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].hanging.opening = cast (int) (coeff.material[p].opening * a + scale(b));
+		a = w[i++]; b = w[i++];
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].trapped.opening = cast (int) (coeff.material[p].opening * a + scale(b));
+		a = w[i++]; b = w[i++];
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].enclosed.opening = cast (int) (coeff.material[p].opening * a + scale(b));
 
 		// center control + king safety + king attack
-		foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].centerControl.opening = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].kingAttack.opening    = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].kingDefense.opening   = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].centerControl.opening = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].kingAttack.opening    = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].kingDefense.opening   = scale(w[i++]);
 
 		// king shield / storm
 		coeff.kingShield.opening = scale(w[i++]);
@@ -721,31 +739,31 @@ public:
 
 		// endgame
 		// material
-		foreach(p; Piece.pawn .. Piece.king) coeff.material[p].endgame = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.king) coeff.material[p].endgame = scale(w[i++]);
 		coeff.material[Piece.king].endgame = 0;
 		coeff.bishopPair.endgame = scale(w[i++]);
 		coeff.materialImbalance.endgame = scale(w[i++]);
 
 		// mobility
-		coeff.safePawnAdvance.endgame   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].safeMobility.endgame    = scale(w[i++]);
-		coeff.unsafePawnAdvance.endgame = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeMobility.endgame  = scale(w[i++]);
-		coeff.safePawnBlock.endgame     = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].safeAttack.endgame      = scale(w[i++]);
-		coeff.unsafePawnBlock.endgame   = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeAttack.endgame    = scale(w[i++]);
-		coeff.safePawnDouble.endgame    = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].safeDefense.endgame     = scale(w[i++]);
-		coeff.unsafePawnDouble.endgame  = scale(w[i++]); foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeDefense.endgame   = scale(w[i++]);
+		coeff.safePawnAdvance.endgame   = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].safeMobility.endgame    = scale(w[i++]);
+		coeff.unsafePawnAdvance.endgame = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeMobility.endgame  = scale(w[i++]);
+		coeff.safePawnBlock.endgame     = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].safeAttack.endgame      = scale(w[i++]);
+		coeff.unsafePawnBlock.endgame   = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeAttack.endgame    = scale(w[i++]);
+		coeff.safePawnDouble.endgame    = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].safeDefense.endgame     = scale(w[i++]);
+		coeff.unsafePawnDouble.endgame  = scale(w[i++]); foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].unsafeDefense.endgame   = scale(w[i++]);
 
 		// hanging & trapped
-		a = w[i++]; b = w[i++]; 
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].hanging.endgame = cast (int) (coeff.material[p].endgame * a + scale(b));
-		a = w[i++]; b = w[i++]; 
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].trapped.endgame = cast (int) (coeff.material[p].endgame * a + scale(b));
-		a = w[i++]; b = w[i++]; 
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].enclosed.endgame = cast (int) (coeff.material[p].endgame * a + scale(b));
+		a = w[i++]; b = w[i++];
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].hanging.endgame = cast (int) (coeff.material[p].endgame * a + scale(b));
+		a = w[i++]; b = w[i++];
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].trapped.endgame = cast (int) (coeff.material[p].endgame * a + scale(b));
+		a = w[i++]; b = w[i++];
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].enclosed.endgame = cast (int) (coeff.material[p].endgame * a + scale(b));
 
 		// center control, king safety & king attack
-		foreach(p; Piece.pawn .. Piece.size) coeff.mobility[p].centerControl.endgame = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].kingAttack.endgame    = scale(w[i++]);
-		foreach(p; Piece.pawn .. Piece.king) coeff.mobility[p].kingDefense.endgame   = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.size) coeff.mobility[p].centerControl.endgame = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].kingAttack.endgame    = scale(w[i++]);
+		foreach (p; Piece.pawn .. Piece.king) coeff.mobility[p].kingDefense.endgame   = scale(w[i++]);
 
 		// king shield / storm
 		coeff.kingShield.endgame = scale(w[i++]);
@@ -808,10 +826,10 @@ public:
 		s.stage = 0;
 		s.pawnCenter = Barycenter.init;
 
-		foreach(Color c; Color.white .. Color.size) {
+		foreach (Color c; Color.white .. Color.size) {
 			s.nPiece[c] = countBits(board.color[c] & ~board.piece[Piece.pawn]);
 			s.materialIndex[c] = 0;
-			foreach(Piece p; Piece.pawn .. Piece.size) {
+			foreach (Piece p; Piece.pawn .. Piece.size) {
 				ulong b = board.color[c] & board.piece[p];
 				const n = countBits(b);
 				s.stage += stageValue[p] * n;
@@ -925,6 +943,7 @@ public:
 		Value value = s.value[player] - s.value[enemy] + coeff.tempo;
 		const lazyValue = toCentipawns(value);
 
+		initPromotion(b);
 		if (α - ε <= lazyValue && lazyValue <= β + ε) {
 			// pieces influence (mobility / attack / defense)
 			initAttack(b);
