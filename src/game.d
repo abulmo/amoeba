@@ -250,7 +250,7 @@ public:
 		tags = g.tags.dup;
 		moves = g.moves.dup;
 		infos = g.infos.dup;
-		if (isOpening) foreach(i; infos) i.book = true;
+		if (isOpening) foreach(ref i; infos) i.book = true;
 	}
 
 	/* constructor */
