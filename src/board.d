@@ -6,8 +6,8 @@
 
 module board;
 
-import move, util;
-import std.algorithm, std.ascii, std.conv, std.format, std.getopt, std.math, std.random, std.stdio, std.string, std.uni;
+import move, util, search;
+import std.algorithm, std.ascii, std.conv, std.format, std.getopt, std.math, std.random, std.range, std.stdio, std.string, std.uni;
 
 /*
  * Color
@@ -95,6 +95,8 @@ enum Square : ubyte {
 	a8, b8, c8, d8, e8, f8, g8, h8,
 	size,
 }
+// an array with all the squares
+auto allSquares() { return iota(Square.a1, Square.size).array; }
 
 /* Mirror square for black */
 Square forward(const Square x, const Color c) {
@@ -326,68 +328,66 @@ struct Mask {
  */
 enum Result {none = 0, draw, repetitionDraw, fiftyDraw, insufficientMaterialDraw, stalemateDraw, whiteWin, blackWin, whiteLossOnTime, blackLossOnTime, whiteIllegalMove, blackIllegalMove, size}
 
-version (withGameSupport) {
-	/* to string */
-	string fromResult(LongFormat f)(const Result r) {
-		with (Result) {
-			static if (f == LongFormat.on) final switch (r) {
-				case none: return "*";
-				case draw: return "{Draw} 1/2-1/2";
-				case repetitionDraw: return "{Draw by repetition} 1/2-1/2";
-				case fiftyDraw: return "{Draw by fifty-move rule} 1/2-1/2";
-				case insufficientMaterialDraw: return "{Draw by insufficient material} 1/2-1/2";
-				case stalemateDraw: return "{Stalemate} 1/2-1/2";
-				case whiteWin: return "{White wins} 1-0";
-				case blackWin: return "{Black wins} 0-1";
-				case whiteLossOnTime: return "{White loses on time} 0-1";
-				case blackLossOnTime: return "{Black loses on time} 1-0";
-				case whiteIllegalMove: return "{White plays an illegal move} 0-1";
-				case blackIllegalMove: return "{Black plays an illegal move} 1-0";
-				case size: return "";
-			} else switch(r) {
-				case none: return "*";
-				case whiteWin: return "1-0";
-				case blackWin: return "0-1";
-				case whiteLossOnTime: return "0-1";
-				case blackLossOnTime: return "1-0";
-				case whiteIllegalMove: return "0-1";
-				case blackIllegalMove: return "1-0";
-				default: return "1/2-1/2";
-			}
+/* to string */
+string fromResult(LongFormat f)(const Result r) {
+	with (Result) {
+		static if (f == LongFormat.on) final switch (r) {
+			case none: return "*";
+			case draw: return "{Draw} 1/2-1/2";
+			case repetitionDraw: return "{Draw by repetition} 1/2-1/2";
+			case fiftyDraw: return "{Draw by fifty-move rule} 1/2-1/2";
+			case insufficientMaterialDraw: return "{Draw by insufficient material} 1/2-1/2";
+			case stalemateDraw: return "{Stalemate} 1/2-1/2";
+			case whiteWin: return "{White wins} 1-0";
+			case blackWin: return "{Black wins} 0-1";
+			case whiteLossOnTime: return "{White loses on time} 0-1";
+			case blackLossOnTime: return "{Black loses on time} 1-0";
+			case whiteIllegalMove: return "{White plays an illegal move} 0-1";
+			case blackIllegalMove: return "{Black plays an illegal move} 1-0";
+			case size: return "";
+		} else switch(r) {
+			case none: return "*";
+			case whiteWin: return "1-0";
+			case blackWin: return "0-1";
+			case whiteLossOnTime: return "0-1";
+			case blackLossOnTime: return "1-0";
+			case whiteIllegalMove: return "0-1";
+			case blackIllegalMove: return "1-0";
+			default: return "1/2-1/2";
 		}
 	}
+}
 
-	/* game result */
-	bool toResult(string text, ref Result r) {
-		size_t a, b;
-		string s;
+/* game result */
+bool toResult(string text, ref Result r) {
+	size_t a, b;
+	string s;
 
-		while (text[a].isSpace()) ++a;
-		for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
-		s = text[a .. b];
-		if (s == "1-0") r = Result.whiteWin;
-		else if (s == "0-1") r = Result.blackWin;
-		else if (s == "1/2-1/2") r = Result.draw;
-		else if (s == "*") r = Result.none;
-		else return false;
-		return true;
-	}
+	while (text[a].isSpace()) ++a;
+	for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
+	s = text[a .. b];
+	if (s == "1-0") r = Result.whiteWin;
+	else if (s == "0-1") r = Result.blackWin;
+	else if (s == "1/2-1/2") r = Result.draw;
+	else if (s == "*") r = Result.none;
+	else return false;
+	return true;
+}
 
-	/* game result (duplicated for shared data) */
-	bool toResult(string text, ref shared Result r) {
-		size_t a, b;
-		string s;
+/* game result (duplicated for shared data) */
+bool toResult(string text, ref shared Result r) {
+	size_t a, b;
+	string s;
 
-		while (text[a].isSpace()) ++a;
-		for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
-		s = text[a .. b];
-		if (s == "1-0") r = Result.whiteWin;
-		else if (s == "0-1") r = Result.blackWin;
-		else if (s == "1/2-1/2") r = Result.draw;
-		else if (s == "*") r = Result.none;
-		else return false;
-		return true;
-	}
+	while (text[a].isSpace()) ++a;
+	for (b = a; b < text.length && !text[b].isSpace(); ++b) {}
+	s = text[a .. b];
+	if (s == "1-0") r = Result.whiteWin;
+	else if (s == "0-1") r = Result.blackWin;
+	else if (s == "1/2-1/2") r = Result.draw;
+	else if (s == "*") r = Result.none;
+	else return false;
+	return true;
 }
 
 /* Kind of move Generation */
@@ -592,14 +592,11 @@ private:
 		}
 	}
 
-	/* can castle kingside ? */
-	bool canCastleKingside() const {
-		return (stack[ply].castling & kingside[player]) != 0;
-	}
-
-	/* can castle queenside ? */
-	bool canCastleQueenside() const {
-		return (stack[ply].castling & queenside[player]) != 0;
+	bool canCastle(const Castling side, const int k, const int r, const ulong occupancy) const {
+		const Color enemy = opponent(player);
+		if ((stack[ply].castling & side) == 0 || (occupancy & mask[k].between[r]) != 0) return false;
+		foreach (x ; (k > r ? k - 2 : k + 1) .. (k > r ? k : k + 3))  if (isSquareAttacked(cast (Square) x, enemy, color[enemy], occupancy)) return false;
+		return true;
 	}
 
 	/* slider attack function for the file, diagonal & antidiagonal directions */
@@ -618,6 +615,14 @@ private:
 		cpiece[to] = cpiece[from];
 		cpiece[from] = CPiece.none;
 	}
+
+	void capture(const Piece victim, const Square x, const Color enemy) {
+		const ulong M = mask[x].bit;
+		piece[Piece.none] ^= M;
+		piece[victim] ^= M;
+		color[enemy] ^= M;
+	}
+
 
 	/* check if a square is attacked */
 	bool isSquareAttacked(const Square x, const Color player, const ulong P, const ulong occupancy) const {
@@ -785,45 +790,51 @@ public:
 		Square x;
 		CPiece p;
 		int r = 7, f;
+		size_t k, l;
 		string [] s = fen.split();
 
-		void error(string msg) {
-			throw new Exception("Bad FEN: " ~ msg ~ " ; fen ");
+		Board error(string msg) {
+			stderr.writeln("error Bad FEN! ", msg, ":\n", fen);
+			foreach (i; 0 .. l) stderr.write("-");
+			stderr.writeln('^');
+			return set();
 		}
 
 		clear();
 
-		if (s.length < 4) error("missing fields");
+		if (s.length < 4) return error("missing fields");
 
-		foreach (c; s[0]) {
+		k = l = 0;
+		foreach (c; s[k]) {
 			if (c== '/') {
-				if (r <= 0) error("rank overflow");
-				if (f != 8) error("missing square");
+				if (r <= 0) return error("rank overflow");
+				if (f < 8) return error("missing square");
+				else if (f > 8) return error("file overflow");
 				f = 0; --r;
 			} else if (isDigit(c)) {
 				f += c - '0';
-				if (f > 8) error("file overflow");
+				if (f > 8) return error("file overflow");
 			} else {
-				if (f > 8) error("file overflow");
+				if (f >= 8) return error("file overflow");
 				x = toSquare(f, r);
 				cpiece[x] = p = toCPiece(c);
-				if (cpiece[x] == CPiece.size) error("bad piece");
+				if (cpiece[x] == CPiece.none) return error("bad piece");
 				piece[toPiece(p)] |= mask[x].bit;
 				color[toColor(p)] |= mask[x].bit;
 				if (toPiece(p) == Piece.king) xKing[toColor(p)] = x;
 				++f;
 			}
+			++l;
 		}
-		if (r > 0 || f != 8) error("missing squares");
+		if (r > 0 || f < 8) return error("missing squares");
 
-		player = toColor(s[1][0]);
-		if (player == Color.size) error("bad player's turn");
+		l = s[k].length + 1; k++;
+		player = toColor(s[k][0]);
+		if (player == Color.size) return error("bad player's turn");
 
-		if (s.length > 4 && isNumeric(s[4])) stack[ply].fifty = std.conv.to!ubyte(s[4]);
-		if (s.length > 5 && isNumeric(s[5])) plyOffset = 2 * (std.conv.to!int(s[5]) - 1) + player;
-
-		if (s[2] != "-") {
-			foreach (c; s[2]) stack[ply].castling |= toCastling(c);
+		l += s[k].length + 1; k++;
+		if (s[k] != "-") {
+			foreach (c; s[k]) stack[ply].castling |= toCastling(c);
 		}
 		if (cpiece[Square.e1] == CPiece.wking) {
 			if (cpiece[Square.h1] != CPiece.wrook) stack[ply].castling &= ~1;
@@ -834,9 +845,28 @@ public:
 			if (cpiece[Square.a8] != CPiece.brook) stack[ply].castling &= ~8;
 		} else stack[ply].castling &= ~12;
 
-		if (s[3] != "-") {
+		l += s[k].length + 1; k++;
+		if (s[k][0] != '-') {
 			stack[ply].enpassant = toSquare(s[3]);
-			if (stack[ply].enpassant == Square.none) error("bad enpassant");
+			if (stack[ply].enpassant == Square.none) return error("bad enpassant");
+		}
+
+		if (s.length > k) {
+			try {
+				l += s[k].length + 1; k++;
+				if (s.length > k && isNumeric(s[k])) stack[ply].fifty = std.conv.to!ubyte(s[4]);
+			} catch (Exception e) {
+				return error("bad fifty number");
+			}
+
+			if (s.length > k) {
+				try {
+					l += s[k].length + 1; k++;
+					if (s.length > k && isNumeric(s[k])) plyOffset = 2 * (std.conv.to!int(s[5]) - 1) + player;
+				} catch (Exception e) {
+					return error("bad ply number");
+				}
+			}
 		}
 
 		piece[Piece.none] = ~(color[Color.white] | color[Color.black]);
@@ -873,7 +903,9 @@ public:
 	override string toString() const {
 		Square x;
 		int f, r;
-		string p = ".PpNnBbRrQqKk#", c = "wb", s;
+		wchar[] p = ['.', '♙', '♟', '♘' , '♞', '♗', '♝', '♖', '♜', '♕', '♛', '♔', '♚', '#'];
+		string c = "wb", s;
+/+		string p = ".PpNnBbRrQqKk#", c = "wb", s; +/
 
 		s ~= "  a b c d e f g h\n";
 		for (r = 7; r >= 0; --r)
@@ -999,28 +1031,32 @@ public:
 		ulong b;
 		Square x;
 
-		pins = 0;
+		pins = checkers = 0;
 		// bishop or queen
-		b = coverage(Piece.bishop, k, occupancy);
-		checkers = partialCheckers = b & bq;
-		b &= color[player];
-		if (b) {
-			b = attack(Piece.bishop, k, bq ^ partialCheckers, occupancy ^ b);
-			while (b) {
-				x = popSquare(b);
-				pins |= mask[k].between[x] & color[player];
+		if (bq) {
+			b = coverage(Piece.bishop, k, occupancy);
+			checkers |= partialCheckers = b & bq;
+			b &= color[player];
+			if (b) {
+				b = attack(Piece.bishop, k, bq ^ partialCheckers, occupancy ^ b);
+				while (b) {
+					x = popSquare(b);
+					pins |= mask[k].between[x] & color[player];
+				}
 			}
 		}
 
 		// rook or queen: all square reachable from the king square.
-		b = coverage(Piece.rook, k, occupancy);
-		checkers |= partialCheckers = b & rq;
-		b &= color[player];
-		if (b) {
-			b = attack(Piece.rook, k, rq ^ partialCheckers, occupancy ^ b);
-			while (b) {
-				x = popSquare(b);
-				pins |= mask[k].between[x] & color[player];
+		if (rq) {
+			b = coverage(Piece.rook, k, occupancy);
+			checkers |= partialCheckers = b & rq;
+			b &= color[player];
+			if (b) {
+				b = attack(Piece.rook, k, rq ^ partialCheckers, occupancy ^ b);
+				while (b) {
+					x = popSquare(b);
+					pins |= mask[k].between[x] & color[player];
+				}
 			}
 		}
 		// other occupancy (no more pins)
@@ -1071,7 +1107,7 @@ public:
 	}
 
 	/* verify if the game is over and return the game result */
-	Result isGameOver() @property {
+	Result isGameOver() const @property {
 		Moves moves = void;
 		Result [Color.size] wins = [Result.blackWin, Result.whiteWin];
 
@@ -1131,7 +1167,7 @@ public:
 	}
 
 	/* Play a move on the board */
-	void update(const Move move) {
+	void update(const Move move, TranspositionTable tt = null) {
 		const to = mask[move.to].bit;
 		const enemy = opponent(player);
 		const p = toPiece(cpiece[move.from]);
@@ -1139,6 +1175,7 @@ public:
 		Stack *n = &stack[ply + 1];
 
 		n.key.update(this, move);
+		if (tt) tt.prefetch(n.key);
 		n.pawnKey.update(this, move);
 		n.castling = u.castling;
 		n.enpassant = Square.none;
@@ -1149,9 +1186,7 @@ public:
 			deplace(move.from, move.to, p);
 			if (n.victim) {
 				n.fifty = 0;
-				piece[Piece.none] ^= to;
-				piece[n.victim] ^= to;
-				color[enemy] ^= to;
+				capture(n.victim, move.to, enemy);
 			}
 			if (p == Piece.pawn) {
 				n.fifty = 0;
@@ -1160,14 +1195,11 @@ public:
 					piece[move.promotion] ^= to;
 					cpiece[move.to] = toCPiece(move.promotion, player);
 				} else if (u.enpassant == move.to) {
-					const x = toSquare(file(move.to), rank(move.from));
-					const b = mask[x].bit;
-					piece[Piece.none] ^= b;
-					piece[Piece.pawn] ^= b;
-					color[enemy] ^= b;
+					const x = cast (Square) (move.to ^ 8);
+					capture(Piece.pawn, x, enemy);
 					cpiece[x] = CPiece.none;
 				} else if (abs(move.to - move.from) == 16 && (mask[move.to].enpassant & (color[enemy] & piece[Piece.pawn]))) {
-					n.enpassant = cast (Square) ((move.from + move.to) / 2);
+					n.enpassant = cast (Square) (move.to ^ 8);
 				}
 			} else if (p == Piece.king) {
 				if (move.to == move.from + 2) deplace(move.from + 3, move.from + 1, Piece.rook);
@@ -1194,9 +1226,7 @@ public:
 		if (move != 0) {
 			deplace(move.to, move.from, p);
 			if (n.victim) {
-				piece[Piece.none] ^= to;
-				piece[n.victim] ^= to;
-				color[enemy] ^= to;
+				capture(n.victim, move.to, enemy);
 				cpiece[move.to] = toCPiece(n.victim, enemy);
 			}
 			if (p == Piece.pawn) {
@@ -1205,11 +1235,8 @@ public:
 					piece[move.promotion] ^= to;
 					cpiece[move.from] = toCPiece(Piece.pawn, player);
 				} else if (u.enpassant == move.to) {
-					const x = toSquare(file(move.to), rank(move.from));
-					const b = mask[x].bit;
-					piece[Piece.none] ^= b;
-					piece[Piece.pawn] ^= b;
-					color[enemy] ^= b;
+					const Square x = cast (Square) (move.to ^ 8);
+					capture(Piece.pawn, x, enemy);
 					cpiece[x] = toCPiece(Piece.pawn, enemy);
 				}
 			} else if (p == Piece.king) {
@@ -1236,7 +1263,7 @@ public:
 	}
 
 	/* generate evasions */
-	void generateEvasions (ref Moves moves) {
+	void generateEvasions (ref Moves moves) const {
 		const Color enemy = opponent(player);
 		const ulong occupancy = ~piece[Piece.none];
 		const ulong bq = piece[Piece.bishop] | piece[Piece.queen];
@@ -1308,7 +1335,7 @@ public:
 	}
 
 	/* generate moves */
-	void generateMoves (Generate type = Generate.all) (ref Moves moves) {
+	void generateMoves (Generate type = Generate.all) (ref Moves moves) const {
 		const Color enemy = opponent(player);
 		const ulong occupancy = ~piece[Piece.none];
 		const ulong target = type == Generate.all ? ~color[player] : type == Generate.capture ? color[enemy] : piece[Piece.none];
@@ -1323,19 +1350,13 @@ public:
 		int d;
 
 		// castling
-		if (type != Generate.capture) {
-			if (canCastleKingside()
-				&& (~piece[Piece.none] & mask[k].between[k + 3]) == 0
-				&& !isSquareAttacked(cast (Square) (k + 1), enemy)
-				&& !isSquareAttacked(cast (Square) (k + 2), enemy)) moves.push(k, cast (Square) (k + 2));
-			if (canCastleQueenside()
-				&& (~piece[Piece.none] & mask[k].between[k - 4]) == 0
-				&& !isSquareAttacked(cast (Square) (k - 1), enemy)
-				&& !isSquareAttacked(cast (Square) (k - 2), enemy)) moves.push(k, cast (Square) (k - 2));
+		static if (type != Generate.capture) {
+			if (canCastle(kingside[player], k, k + 3, occupancy)) moves.push(k, cast (Square) (k + 2));
+			if (canCastle(queenside[player], k, k - 4, occupancy)) moves.push(k, cast (Square) (k - 2));
 		}
 
 		// pawn (enpassant)
-		if (type != Generate.quiet && stack[ply].enpassant != Square.none) {
+		static if (type != Generate.quiet) if (stack[ply].enpassant != Square.none) {
 			to = stack[ply].enpassant;
 			x = cast (Square) (to - pawnPush);
 			from = cast (Square) (x - 1);
@@ -1357,19 +1378,22 @@ public:
 			const int pawnRight = pawnPush + 1;
 			from = popSquare(attacker);
 			d = mask[k].direction[from];
-			if (type != Generate.quiet && d == abs(pawnLeft)) {
-				to = cast (Square) (from + pawnLeft);
-				if (toColor(cpiece[to]) == enemy) {
-					if (rank(forward(from, player)) == 6) moves.pushPromotions(from, to);
-					else moves.push(from, to);
+			static if (type != Generate.quiet) {
+				if (d == abs(pawnLeft)) {
+					to = cast (Square) (from + pawnLeft);
+					if (toColor(cpiece[to]) == enemy) {
+						if (rank(forward(from, player)) == 6) moves.pushPromotions(from, to);
+						else moves.push(from, to);
+					 }
+				} else if (d == abs(pawnRight)) {
+					to = cast (Square) (from + pawnRight);
+					if (toColor(cpiece[to]) == enemy) {
+						if (rank(forward(from, player)) == 6) moves.pushPromotions(from, to);
+						else moves.push(from, to);
+					}
 				}
-			} else if (type != Generate.quiet && d == abs(pawnRight)) {
-				to = cast (Square) (from + pawnRight);
-				if (toColor(cpiece[to]) == enemy) {
-					if (rank(forward(from, player)) == 6) moves.pushPromotions(from, to);
-					else moves.push(from, to);
-				}
-			} else if (type != Generate.capture && d == abs(pawnPush)) {
+			}
+			static if (type != Generate.capture) if (d == abs(pawnPush)) {
 				to = cast (Square) (from + pawnPush);
 			 	if (cpiece[to] == CPiece.none) {
 					moves.push(from, to);
@@ -1490,16 +1514,8 @@ public:
 		// illegal castling ?
 		if (p == Piece.king) {
 			Square k = move.from;
-			if ((k == move.to - 2) &&
-				   (!canCastleKingside
-				|| (~piece[Piece.none] & mask[k].between[k + 3])
-				|| isSquareAttacked(cast (Square) (k + 1), enemy)
-				|| isSquareAttacked(cast (Square) (k + 2), enemy))) return false;
-			if ((k == move.to + 2) &&
-				   (!canCastleQueenside()
-				|| (~piece[Piece.none] & mask[k].between[k - 4])
-				|| isSquareAttacked(cast (Square) (k - 1), enemy)
-				|| isSquareAttacked(cast (Square) (k - 2), enemy))) return false;
+			if ((k == move.to - 2) && !canCastle(kingside[player], k, k + 3, occupancy)) return false;
+			if ((k == move.to + 2) && !canCastle(queenside[player], k, k - 4, occupancy)) return false;
 		}
 
 		if (checkOwnKing(move)) return false;
@@ -1508,7 +1524,7 @@ public:
 	}
 
 	/* guess a move from SAN information */
-	version (withGameSupport) Move guess(const Piece p, const Square to, const int f, const int r, const Piece promotion, const bool capture) const {
+	Move guess(const Piece p, const Square to, const int f, const int r, const Piece promotion, const bool capture) const {
 		const CPiece cp = toCPiece(p, player);
 		Square from;
 		const int [2] push = [8, -8];
@@ -1537,17 +1553,22 @@ public:
 	}
 
 	/* get next Attacker to compute SEE */
-	Piece nextVictim(ref ulong [Color.size] board, const Square to, const Color c, ref Piece [Color.size] last) const {
+	Piece nextAttacker(ref ulong [Color.size] board, const Square to, const Color c, ref Piece [Color.size] last, ref int score) const {
 		const Color enemy = opponent(c);
 		const ulong P = board[c];
 		const ulong occupancy = board[c] | board[enemy];
 		ulong attacker;
-		static immutable Piece [Piece.size] next = [Piece.none, Piece.pawn, Piece.knight, Piece.bishop, Piece.rook, Piece.bishop, Piece.size];
+		const Piece [Piece.size] next = [Piece.none, Piece.pawn, Piece.knight, Piece.bishop, Piece.rook, Piece.bishop, Piece.size];
 
-		// remove the last attacker and return the victim
-		Piece victim(const Piece p) {
+		// remove the last attacker and return the attacker
+		Piece victim(Piece p) {
 			board[c] ^= (attacker & -attacker);
 			last[c] = p;
+			if (rank(forward(to, c)) == 7) {
+				p = Piece.queen;
+				if (c == player) score += seeValue[p] - seeValue[Piece.pawn];
+				else score -= seeValue[p] - seeValue[Piece.pawn];
+			}
 			return p;
 		}
 
@@ -1584,28 +1605,125 @@ public:
 	int see(const Move move) const {
 		const Square to = move.to;
 		const Color enemy = opponent(player);
-		const Piece p = toPiece(cpiece[move.from]);
+		Piece p = toPiece(cpiece[move.from]);
 		ulong [Color.size] board = color;
 		Piece [Color.size] last = [Piece.pawn, Piece.pawn];
 		Piece victim = toPiece(cpiece[to]);
-		int score = seeValue[victim], α = score - seeValue[p], β = score;
+		int score, α, β;
+
+		score = seeValue[victim];
+		if (p == Piece.pawn) {
+			if (stack[ply].enpassant == to) score = seeValue[victim = Piece.pawn];
+			if (move.promotion) score += seeValue[p = move.promotion] - seeValue[Piece.pawn];
+		}
+		α = score - seeValue[p];
+		β = score;
 
 		if (α <= 0) {
 			board[player] ^= mask[move.from].bit;
-			score -= seeValue[p];
-			if ((victim = nextVictim(board, to, enemy, last)) == Piece.none) return β;
+			score -= seeValue[victim = p];
+			if ((p = nextAttacker(board, to, enemy, last, score)) == Piece.none) return β;
 			while (true) {
-				score += seeValue[victim];
-				if (score <= α || (victim = nextVictim(board, to, player, last)) == Piece.none) return α;
+				score += seeValue[victim = p];
+				if ((p = nextAttacker(board, to, player, last, score)) == Piece.none || score <= α) return α;
 				if (score < β) β = score;
 
-				score -= seeValue[victim];
-				if (score >= β || (victim = nextVictim(board, to, enemy, last)) == Piece.none) return β;
+				score -= seeValue[victim = p];
+				if ((p = nextAttacker(board, to, enemy, last, score)) == Piece.none || score >= β ) return β;
 				if (score > α) α = score;
 			}
 		}
 
 		return score;
+	}
+
+	/* run perft: test correctness & speed of the move generator */
+	ulong perft (const int depth, const bool bulk = false, const bool div = false) {
+		Moves moves = void;
+		ulong count, total;
+
+		moves.generate(this);
+		foreach (Move m; moves) {
+			update(m);
+				if (depth == 1) count = 1;
+				else if (depth == 2 && bulk) {
+					Moves c = void;
+					c.generate(this);
+					count += c.length;
+				} else count = perft(depth - 1, bulk);
+				total += count;
+			restore(m);
+			if (div) writefln("%5s %16d", m.toSan(this), count);
+		}
+
+		return total;
+	}
+}
+
+
+/* perft with arguments */
+void perft(string[] arg, Board init) {
+	Board board = init ? init : new Board;
+	int depth = 6;
+	bool div, help, bulk, loop;
+	ulong total;
+	Chrono t;
+	string fen;
+
+	getopt(arg, "fen|f", &fen, "div", &div, "depth|d", &depth, "loop|l", &loop, "bulk|b", &bulk, "help|h", &help);
+	if (help) writeln("perft [--depth|-d <depth>] [--fen|-f <fen>] [--div]  | [--loop|-l] [--bulk|-b] [--help|-h]");
+	if (fen.length > 0) board.set(fen);
+
+	writeln(board);
+	for (int d = loop ? 0 : depth; d <= depth; ++d) {
+		t.start();
+		total = d > 0 ? board.perft(d, bulk, div) : 1;
+		writefln("perft %d: %d leaves const %.3fs (%.0f leaves/s)", d, total, t.time(), total / t.time());
+	}
+}
+
+
+/* Test the correctness of the move generator */
+void test() {
+	struct TestBoard {
+		string comments;
+		string fen;
+		int depth;
+		ulong result;
+	}
+
+	writeln("Testing the board generator");
+	TestBoard [] tests = [
+		{"1. Initial position ", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 6, 119_060_324},
+		{"2. Kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 5, 193_690_690},
+		{"3.", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -", 7, 178_633_661},
+		{"4.", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 6, 706_045_033},
+		{"5.", "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", 6, 89_941_194},
+		{"6.", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 6, 6_923_051_137},
+		{"7.", "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1", 6, 824_064},
+		{"8. Enpassant capture gives check", "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1", 6, 1_440_467},
+		{"9. Short castling gives check", "5k2/8/8/8/8/8/8/4K2R w K - 0 1", 6, 661_072},
+		{"10. Long castling gives check", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 6, 803_711},
+		{"11. Castling", "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1", 4, 1_274_206},
+		{"12. Castling prevented", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1", 4, 1_720_476},
+		{"13. Promote out of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 6, 3_821_001},
+		{"14. Discovered check", "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1", 5, 1_004_658},
+		{"15. Promotion gives check", "4k3/1P6/8/8/8/8/K7/8 w - - 0 1", 6, 217_342},
+		{"16. Underpromotion gives check", "8/P1k5/K7/8/8/8/8/8 w - - 0 1", 6, 92_683},
+		{"17. Self stalemate", "K1k5/8/P7/8/8/8/8/8 w - - 0 1", 6, 2_217},
+		{"18. Stalemate/Checkmate", "8/k1P5/8/1K6/8/8/8/8 w - - 0 1", 7, 567_584},
+		{"19. Double check", "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1", 4, 23_527},
+	];
+	Board b = new Board;
+
+	foreach (test; tests) {
+		write("Test ", test.comments); stdout.flush();
+		b.set(test.fen);
+		claim(b.toFen()[0 .. test.fen.length] == test.fen);
+		claim(b.perft(test.depth, true) == test.result);
+		b.mirror();
+		claim(b.perft(test.depth, true) == test.result);
+		writeln(" passed"); stdout.flush();
 	}
 }
 
