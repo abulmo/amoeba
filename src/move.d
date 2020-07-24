@@ -257,7 +257,7 @@ private:
 	static immutable short [Piece.size] vPiece = [0, 1, 2, 3, 4, 5, 6];
 	static immutable short [Piece.size] vPromotion = [0, 0, 48, 16, 32, 64, 0];
 	static immutable short [Piece.size] vCapture = [0, 256, 512, 768, 1024, 1280, 1536];
-	static immutable short [Square.size] center = allSquares.map!(cdist).array; 
+	static immutable short [Square.size] center = allSquares.map!(cdist).array;
 	enum short badSeeMalus = -History.max - vCapture[Piece.king];
 	enum short ttBonus = 10_000;
 	enum short killerBonus = 10;
@@ -298,7 +298,7 @@ private:
 				if (i.value == -vPiece[Piece.pawn]) {
 					if (board.isEnpassant(m)) i.value += vCapture[Piece.pawn]; // en passant
 					else i.value = to7thRankBonus; // push to 7
-				}						
+				}
 			}
 		}
 		insertionSort(item[o .. n]);
