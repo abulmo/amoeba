@@ -87,6 +87,7 @@ void prefetch(void *v) {
 
 /*
  * struct Chrono
+ * a simple chronometer
  */
 struct Chrono {
 	private TickDuration tick;
@@ -187,7 +188,7 @@ public:
 		}
 	}
 
-	/* peek an event */
+	/* peek an event (from the user interface) */
 	string peek() {
 		string s;
 		synchronized (lock) {
@@ -201,7 +202,7 @@ public:
 		return s;
 	}
 
-	/* wait for an event */
+	/* wait for an event (from the user interface) */
 	string retrieve() {
 		while (empty) Thread.sleep(1.msecs);
 		return peek();
@@ -224,20 +225,22 @@ public:
 
 	/* daemon */
 	void daemon() {
-		auto t = new Thread((){loop();});
+		auto t = new Thread( (){ loop(); } );
 		t.isDaemon = true;
 		t.start();
 		t.setAffinity(totalCPUs - 1);
 	}
 
-	/* send */
+	/* send a message (to the user interface) */
 	void send(T...) (T args) {
-		stdout.writeln(args);
-		stdout.flush();
+		synchronized (ioLock) {
+			stdout.writeln(args);
+			stdout.flush();
+		}
 		log!'>'(args);
 	}
 
-	/* log */
+	/* write to the logfile with a date stamp */
 	void log(const char tag = '#', T...) (T args) {
 		if (logFile.isOpen) {
 			synchronized (ioLock) {
@@ -248,6 +251,7 @@ public:
 		}
 	}
 
+	/* verbatim write to the log file */
 	void write(const char tag = '#', T...) (T args) {
 		if (logFile.isOpen) {
 			synchronized (ioLock) {
@@ -345,9 +349,10 @@ void unreachable(string file = __FILE__, const int line = __LINE__) {
 string findBetween(string s, string start, string end) {
 	size_t i, j;
 
-	for (; i < s.length; ++i) if (s[i .. i + start.length] == start) break;
-	i += start.length; if (i > s.length) i = s.length;
-	for (j = i; j < s.length; ++j) if (s[j .. j + end.length] == end) break;
+	for (; i < s.length - start.length; ++i) if (s[i .. i + start.length] == start) break;
+	i += start.length;
+	for (j = i; j < s.length - end.length; ++j) if (s[j .. j + end.length] == end) break;
+	if (s[j .. j + end.length] != end) j = s.length;
 
 	return s[i .. j];
 }
