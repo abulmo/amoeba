@@ -166,7 +166,7 @@ class Match {
 				r = [Result.whiteIllegalMove, Result.blackIllegalMove][b.player];
 				break;
 			}
-			game.push(m, engine[b.player].info.get());
+			game.push(m, engine[b.player].info[0].get());
 			if (!time.update(b.player, chrono.time, margin)) {
 				writefln("%s loses on time", engine[b.player].name);
 				r = [Result.whiteLossOnTime, Result.blackLossOnTime][b.player];
