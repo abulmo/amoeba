@@ -99,8 +99,8 @@ void analyse(shared Game game, Search *search, Engine engine, const ref search.O
 			if (option.depth.end < Limits.ply.max) cmd = "depth " ~ to!string(option.depth.end);
 			else cmd = "movetime " ~ to!string(cast(int) (1000 * option.time.max));
 			engine.go(cmd);
-			score[0] = engine.info.score;
-			pv.set(engine.pv);
+			score[0] = engine.info[0].score;
+			pv.set(engine.info[0].pv);
 		} else if (search) {
 			search.position(board);
 			search.go(option, moves);
@@ -134,8 +134,8 @@ void analyse(shared Game game, Search *search, Engine engine, const ref search.O
 				else cmd = "movetime " ~ to!string(cast(int) (1000 * option.time.max));
 				cmd ~= " searchmoves " ~ moves.toString();
 				engine.go(cmd);
-				score[1] = engine.info.score;
-				pv.set(engine.pv);
+				score[1] = engine.info[0].score;
+				pv.set(engine.info[0].pv);
 			} else if (search) {
 				search.position(board);
 				search.go(option, moves);
@@ -207,7 +207,6 @@ void main(string [] arg) {
 	option.easy = false;
 	option.multiPv = 1;
 	option.verbose = false;
-	option.doPrune = !analyseMode;
 	if (executable.length > 0) {
 		engine = new Engine(executable);
 		if (showDebug) engine.startDebugging("postmortem");
