@@ -51,113 +51,6 @@ Move fromPan(string s) {
 	return cast (Move) (from | to << 6 | promotion << 12);
 }
 
-/* convert a string using standard algebraic notation (SAN) into a move */
-Move fromSan(string s, const Board b) {
-	int i, r = -1, f = -1;
-	Square from, to;
-	Piece promotion = Piece.none;
-	Move move;
-	Piece p;
-	bool isCapture;
-
-	bool hasString(string t) {return  s.length >= t.length && s[0 .. t.length] == t; }
-	bool hasChar(const int j, char c) { return j < s.length && s[j] == c; }
-	bool hasAlpha(const int j) { return j < s.length && isAlpha(s[j]); }
-	bool hasDigit(const int j) { return j < s.length && isDigit(s[j]); }
-
-	if (hasString("O-O-O") || hasString("0-0-0")) {
-		from = b.xKing[b.player];
-		to = cast (Square) (from - 2);
-		move = toMove(from, to);
-	} else if (hasString("O-O") || hasString("0-0")) {
-		from = b.xKing[b.player];
-		to = cast (Square) (from + 2);
-		move = toMove(from, to);
-	} else {
-		if (isUpper(s[i])) p = toPiece(s[i++]);
-		else p = Piece.pawn;
-		isCapture = true;
-		if (hasChar(i, 'x')) ++i;
-		else if (hasChar(i + 1, 'x')) {
-			if (hasAlpha(i)) f = s[i] - 'a';
-			else if (hasDigit(i)) r = s[i] - '1';
-			i += 2;
-		} else if (hasChar(i + 2, 'x')) {
-			if (hasAlpha(i)) f = s[i] - 'a';
-			if (hasDigit(i + 1)) r = s[i + 1] - '1';
-			i += 3;
-		} else {
-			isCapture = false;
-			if (hasAlpha(i + 1)) {
-				if (hasAlpha(i)) f = s[i] - 'a';
-				else if (hasDigit(i)) r = s[i] - '1';
-				i += 1;
-			} else if (hasAlpha(i + 2) && hasDigit(i + 3)) {
-				if (hasAlpha(i)) f = s[i] - 'a';
-				if (hasDigit(i + 1)) r = s[i + 1] - '1';
-				i += 2;
-			}
-		}
-		to = toSquare(s[i..i+2]); i += 2;
-		if (hasChar(i, '=')) {
-			promotion = toPiece(s[i + 1]);
-			i += 2;
-		}
-	}
-
-	if (move == 0) move = b.guess(p, to, f, r, promotion, isCapture);
-
-	if (b.isLegal(move)) return move;
-
-	move = fromPan(s);
-
-	if (b.isLegal(move)) {
-		stderr.writeln("warning: expected SAN instead of PAN '", s, "'");
-		return move;
-	} else {
-		stderr.writeln("error: bad SAN '", s, "' -> ", toPan(move));
-	}
-
-	return 0;
-}
-
-/* convert a move to a string using Standard Algebraic Notation (SAN) */
-string toSan(const Move move, Board board) {
-	string f = "abcdefgh", r = "12345678", s;
-	int nSameFile, nSameTo;
-	Moves moves = void;
-	const Piece p = toPiece(board[move.from]);
-
-	if (move == 0) s = "@@@@";
-	else if (p == Piece.king && move.to == move.from + 2) s = "O-O";
-	else if (p == Piece.king && move.to == move.from - 2) s = "O-O-O";
-	else {
-		if (p != Piece.pawn) {
-			moves.generate(board);
-			foreach (m; moves) {
-				if (move.to == m.to && p == toPiece(board[m.from]) && move.from != m.from) {
-					++nSameTo;
-					if (file(move.from) == file(m.from)) ++nSameFile;
-				}
-			}
-			s ~= p.toChar();
-		}
-		if ((p == Piece.pawn && file(move.from) != file(move.to)) || nSameTo > nSameFile) s ~= f[file(move.from)];
-		if (nSameFile) s ~= r[rank(move.from)];
-		if ((p == Piece.pawn && file(move.from) != file(move.to)) || board[move.to]) s ~= 'x';
-		s ~= f[file(move.to)]; s ~= r[rank(move.to)];
-		if (move.promotion) s ~= "=" ~ toChar(move.promotion);
-	}
-
-	if (board.giveCheck(move)) {
-		board.update(move);
-			moves.generate(board);
-			if (moves.length) s ~= '+'; else s ~= '#';
-		board.restore(move);
-	}
-	return s;
-}
-
 /*
  * Search history
  */
@@ -220,7 +113,7 @@ struct MoveItem {
 
 	/* toString */
 	string toString(Board b) {
-		return "(" ~ (b ? move.toSan(b) : move.toPan()) ~ ", " ~ format("%d", value) ~ ")";
+		return "(" ~ move.toPan() ~ ", " ~ format("%d", value) ~ ")";
 	 }
 }
 
@@ -334,7 +227,7 @@ private:
 					i.value = cast (short) (vCapture[victim] + vPromotion[i.move.promotion] - vPiece[p]);
 					if (board.see(i.move) < 0 && board.giveCheck(i.move) < 2) i.value += badSeeMalus;
 				} else {
-					i.value = (p == Piece.king) ? 1 : -vPiece[p];
+					i.value = cast (short) ((p == Piece.king) ? 1 : -vPiece[p]);
 				}
 			}
 		}
@@ -523,13 +416,6 @@ public:
 		return s;
 	}
 
-	/* convert to string using SAN */
-	string toSan(Board board) const {
-		string s;
-		foreach (ref i; item[0..n]) s ~= i.move.toSan(board) ~ " ";
-		return s;
-	}
-
 	/* dump */
 	void dump(std.stdio.File f = stdout) const {
 		foreach (ref i; item[0 .. n]) f.write(i.move.toPan(), " [", i.value, "], ");
@@ -608,21 +494,6 @@ struct Line {
 		foreach (m; move[0 .. n]) s ~= m.toPan() ~ " ";
 		return s;
 	}
-
-	/* Convert it to a string */
-	string toSan(Board board) const {
-		string s;
-		if (board.player == Color.black) s = format("%d... ", (board.ply + board.plyOffset) / 2 + 1);
-		foreach (m; move[0 .. n]) {
-			if (board.player == Color.white) s ~= format("%d.", (board.ply + board.plyOffset) / 2 + 1);
-			s ~= m.toSan(board) ~ " ";
-			board.update(m);
-		}
-		foreach_reverse (m; move[0 .. n]) board.restore(m);
-
-		return s;
-	}
-
 
 	/* last pushed move */
 	Move top() const @property {
