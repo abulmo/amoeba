@@ -64,8 +64,7 @@ void main(string[] args) {
 			if (arg == "--affinity" || arg == "-a") affinity = args[i + 1];
 		}
 		if (args.length > 1) {
-			if (args[1] == "test") board.test();
-			else if (args[1] == "perft") board.perft(args[1 .. $], null);
+			if (args[1] == "perft") board.perft(args[1 .. $], null);
 			else if (args[1] == "bench") {
 				Search s = Search(hashSize.MBytes, nThreads, null);
 				bench(args[1 .. $], s);
