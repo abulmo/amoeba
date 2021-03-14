@@ -141,7 +141,7 @@ string hour() {
  *  - logging for debugging
  *  - internal message passing
  */
-class Message {
+final class Message {
 private:
 	string [] ring;
 	size_t first, last;
@@ -178,10 +178,10 @@ public:
 	void push(string s) {
 		synchronized (lock) {
 			if (full) {
-				const l = ring.length, δ = l - 1;
+				const l = ring.length, δ = l;
 				ring.length = 2 * l;
 				foreach (i ; 0 .. first) ring[i + δ] = ring[i];
-				last = first + δ;
+				last = first + δ - 1;
 			}
 			ring[last] = s;
 			last = (last + 1) % ring.length;
@@ -218,8 +218,9 @@ public:
 		string line;
 		do {
 			line = readln().chomp();
+			if (line is null) line = "quit";
 			push(line);
-		} while (line != "quit" && stdin.isOpen);
+		} while (line != "quit");
 		log("Bye!");
 	}
 
@@ -255,7 +256,7 @@ public:
 	void write(const char tag = '#', T...) (T args) {
 		if (logFile.isOpen) {
 			synchronized (ioLock) {
-				logFile.write(args);
+				logFile.write(tag, args);
 			}
 		}
 	}
@@ -351,10 +352,9 @@ string findBetween(string s, string start, string end) {
 
 	for (; i < s.length - start.length; ++i) if (s[i .. i + start.length] == start) break;
 	i += start.length;
-	for (j = i; j < s.length - end.length; ++j) if (s[j .. j + end.length] == end) break;
-	if (s[j .. j + end.length] != end) j = s.length;
+	for (j = i; j <= s.length - end.length; ++j) if (s[j .. j + end.length] == end) return s[i .. j];
 
-	return s[i .. j];
+	return s[i .. $];
 }
 
 /* check if a File is writeable/readable */
