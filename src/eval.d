@@ -204,14 +204,6 @@ private:
 		return 1.0 / (d + 1.0);
 	}
 
-	/* compute the inclination of a target square x to a distant square y */
-	static double inclination(const Square x, const Square y) {
-		const int r = rank(x) - rank(y);
-		const int f = file(x) - file(y);
-		const int d = abs(r) + abs(f);
-		return d == 0 ? 2.0 : 1.0 / d;
-	}
-
 	/* scale a floating point coeff & round it to an integer n so that n * 64 = 1 centipawn (1024) */
 	static int scale(const double w, const double f = 1600) {
 		return cast (int) (f * w + (w > 0 ? 0.5 : w < 0 ? -0.5 : 0.0));
@@ -895,21 +887,6 @@ public:
 	/* restore the evaluation */
 	void restore() {
 		--ply;
-	}
-
-	/* stage */
-	int stage() const @property {
-		return stack[ply].stage;
-	}
-
-	/* functor: lazy evaluation */
-	int opCall(const Board b) const {
-		const Color player = b.player;
-		const Color enemy = opponent(player);
-		const Stack *s = &stack[ply];
-		const Value value = s.value[player] - s.value[enemy] + coeff.tempo;
-
-		return toCentipawns(value);
 	}
 
 	/* functor: lazy evaluation change by a move */
