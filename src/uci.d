@@ -6,12 +6,12 @@
 
 module uci;
 
-import board, eval, move, search, util;
+import board, eval, move, search, tt, util;
 import std.algorithm, std.array, std.conv, std.concurrency, std.parallelism, std.stdio, std.string;
 import core.thread;
 
 /* version */
-enum string versionNumber = "3.2";
+enum string versionNumber = "3.3";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -40,7 +40,7 @@ string arch() @property {
 }
 
 /* uci class */
-class Uci {
+final class Uci {
 	string name;
 	struct Time {
 		double remaining, increment;
@@ -97,9 +97,8 @@ class Uci {
 
 		if (t > 0) {
 			if (movesToGo > 0) todo = movesToGo;
-			t += todo * time[p].increment;
-			t = max(t - 1.0, 0.95 * t) / todo;
- 			t = min(t, time[p].remaining - 0.1);
+			t = min(t, (t + time[p].increment * (todo - 1)) / todo);
+			t = max(t - 1.0, 0.95 * t);
 		} else {
 			t = time[p].increment;
 			if (t > 0) {
@@ -113,13 +112,7 @@ class Uci {
 
 	/* set max time to use const hard (failing low) position */
 	double setExtraTime(const double maxTime) {
-		const p = board.player;
-		double t;
-
-		t = max(maxTime, min(2.0 * maxTime, time[p].remaining * 0.1)); 
-		message.log("time> ", time[p].remaining, "/", movesToGo, "+", time[p].increment, " -> time.max: ", maxTime, ", time.extra: ", t);
-
-		return t;
+		return max(maxTime, min(2.0 * maxTime, time[board.player].remaining * 0.1)); 
 	}
 
 	/* uci command */
@@ -205,6 +198,7 @@ class Uci {
 		option.nodes.max = ulong.max;
 		foreach(c ; Color.white .. Color.size) time[c].clear();
 		isPondering = infiniteSearch = false;
+		// interpret the go command parameters
 		foreach(i, ref w ; words) {
 			if (w == "searchmoves") searchmoves(words);
 			else if (w == "ponder") isPondering = true;
@@ -219,20 +213,22 @@ class Uci {
 			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "infinite") { option.depth.end =  Limits.ply.max; infiniteSearch = true; }
 		}
-		option.time.max = setTime();
-		option.time.extra = setExtraTime(option.time.max);
-		option.easy = (easy && multipv == 1 && time[board.player].remaining > 0.0);
-		option.multiPv = multipv;
-		option.isPondering = isPondering;
-		option.verbose = true;
-		option.cpu.max = totalCPUs;
-		option.cpu.affinity.set(affinity);
 		// option overriding from the commandline
 		if (forcedDepth >= 0) option.depth.end = forcedDepth;
 		if (forcedTime > 0.0) {
 			time[board.player].clear();
 			time[board.player].increment = 0.001 * forcedTime;
 		}
+		// set options
+		option.time.max = setTime();
+		option.time.extra = setExtraTime(option.time.max);
+		message.log("time> ", time[board.player].remaining, "/", movesToGo, "+", time[board.player].increment, ", time.max: ", option.time.max, ", time.extra: ", option.time.extra);
+		option.easy = (easy && multipv == 1 && time[board.player].remaining > 0.0);
+		option.multiPv = multipv;
+		option.isPondering = isPondering;
+		option.verbose = true;
+		option.cpu.max = totalCPUs;
+		option.cpu.affinity.set(affinity);
 		message.log("search options: ", option);
 		search.go(option, moves);
 		if (!isPondering && !infiniteSearch) bestmove();
@@ -249,21 +245,20 @@ class Uci {
 		while (stdin.isOpen) {
 			auto line = message.retrieve();
 			if (line is null || line == "" || line[0] == '#') continue;
-			else if (findSkip(line, "ucinewgame")) ucinewgame();
-			else if (findSkip(line, "uci")) uci();
-			else if (findSkip(line, "isready")) message.send("readyok");
-			else if (findSkip(line, "setoption")) setoption(line);
-			else if (findSkip(line, "position")) position(line);
+			else if (findSkip(line, "debug")) message.logOn();
 			else if (findSkip(line, "go")) go(line);
-			else if (findSkip(line, "stop")) play();
+			else if (findSkip(line, "isready")) message.send("readyok");
+			else if (findSkip(line, "position")) position(line);
 			else if (findSkip(line, "ponderhit")) play();
 			else if (findSkip(line, "quit")) break;
+			else if (findSkip(line, "ucinewgame")) ucinewgame();
+			else if (findSkip(line, "uci")) uci();
+			else if (findSkip(line, "setoption")) setoption(line);
+			else if (findSkip(line, "stop")) play();
 			// extension
-			else if (startsWith(line, "test")) test();
-			else if (startsWith(line, "perft")) perft(line.split(), board);
 			else if (startsWith(line, "bench")) bench(line.split(), search);
+			else if (startsWith(line, "perft")) perft(line.split(), board);
 			// unused
-			else if (findSkip(line, "debug")) {}
 			else if (findSkip(line, "register")) {}
 			// xboard
 			else if (findSkip(line, "xboard")) {
