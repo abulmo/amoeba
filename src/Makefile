@@ -2,12 +2,10 @@
 # Makefile to compile amoeba & some utilities
 #
 
-AMOEBA_SRC = amoeba.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d
-TOURNEY_SRC = tourney.d board.d engine.d game.d move.d search.d eval.d kpk.d util.d
-TUNE_SRC = tune.d util.d board.d eval.d game.d kpk.d move.d search.d weight.d
-POSTMORTEM_SRC = postmortem.d game.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d engine.d
-EPDTEST_SRC = epdtest.d game.d util.d board.d eval.d kpk.d move.d search.d uci.d weight.d engine.d
+#sources
+SRC = amoeba.d board.d eval.d kpk.d move.d search.d tt.d uci.d util.d weight.d
 
+#default setting
 ifeq ($(DC),)
 	DC = ldc2
 endif
@@ -26,7 +24,7 @@ endif
 
 #gdc
 ifeq ($(DC),gdc)
-	DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -mtune=$(CPU) -o $(EXE)
+	DFLAGS = -W -Wno-uninitialized -Wall -Wpedantic -Wextra -mtune=$(CPU) -o amoeba
 	ifeq ($(BUILD),fast)
 		DFLAGS +=  -O3 -frelease -fno-bounds-check
 	else ifeq ($(BUILD),debug)
@@ -45,15 +43,15 @@ endif
 
 #lcd2
 ifeq ($(DC),ldc2)
-	DFLAGS = -singleobj -w -dw -mcpu=$(CPU) -dip25
+	DFLAGS = -singleobj -w -dw -mcpu=$(CPU) -dip25 -preview=intpromote $(OS)
 	ifeq ($(BUILD),fast)
 		DFLAGS += -O -release -boundscheck=off -flto=full --frame-pointer=none
 	else ifeq ($(BUILD),debug)
-		DFLAGS = -O -g -gc
+		DFLAGS = -O0 -g -gc --checkaction=C
 	else ifeq ($(BUILD),perf)
 		DFLAGS = -O1 -boundscheck=off
 	else ifeq ($(BUILD),cov)
-		DFLAGS = -O -release -boundscheck=off -flto=full -cov
+		DFLAGS = -O0 -release -boundscheck=off -flto=full -cov
 	endif
 	ifeq ($(POPCOUNT),true)
 		DFLAGS += -d-version=withPopCount -mattr=+sse4.2,+popcnt
@@ -87,96 +85,33 @@ ifeq ($(DC),dmd)
 	PGO_MERGE = 
 endif
 
-# executable target
-ifeq ($(EXE),)
-	EXE = amoeba
-endif
-
-#amoeba
-ifeq ($(EXE),amoeba)
-	SRC = $(AMOEBA_SRC)
-#tourney
-else ifeq ($(EXE),tourney)
-	SRC = $(TOURNEY_SRC)
-#tune
-else ifeq ($(EXE),tune)
-	SRC = $(TUNE_SRC)
-#postmortem
-else ifeq ($(EXE),postmortem)
-	SRC = $(POSTMORTEM_SRC)
-#epdtest
-else ifeq ($(EXE),epdtest)
-	SRC = $(EPDTEST_SRC)
-endif
-
-default :
+amoeba: $(SRC)
 	$(DC) $(DFLAGS) $(SRC)
 
-pgo-gen:
-	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC)
-
-pgo-use:
+pgo : $(SRC)
+	$(MAKE) clean
+	$(DC) $(DFLAGS) $(PGO_GEN) $(SRC) 
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./amoeba perft -d 6
+	LLVM_PROFILE_FILE=amoeba-%p.profraw ./amoeba bench -c 4 -d 12
 	$(PGO_MERGE)
-	$(DC) $(DFLAGS) $(PGO_USE) $(SRC)
-pgo : $(AMOEBA_SRC)
-	$(MAKE) clean
-	$(MAKE) pgo-gen CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) perft -d 6
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./$(EXE) bench -c 4 -d 12
-	$(MAKE) pgo-use CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+	$(DC) $(DFLAGS) $(PGO_USE) $(SRC) 
 
-debug : $(AMOEBA_SRC)
-	$(MAKE) BUILD=debug EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
+debug : $(SRC)
+	$(MAKE) BUILD=debug
 
-perf : $(AMOEBA_SRC)
-	$(MAKE) BUILD=perf EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-amoeba: $(AMOEBA_SRC)
-	$(MAKE) pgo EXE=amoeba CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-tourney: $(TOURNEY_SRC)
-	$(MAKE) EXE=tourney CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-tune: $(TUNE_SRC)
-	$(MAKE) EXE=tune CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-pgo-postmortem:$(POSTMORTEM_SRC)
-	$(MAKE) clean
-	$(MAKE) pgo-gen EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./postmortem -c 4 -f lasker_vs_herzfeld_1895.pgn -d 10
-	$(MAKE) pgo-use EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-pgo-epdtest:$(EPDTEST_SRC)
-	$(MAKE) clean
-	$(MAKE) pgo-gen EXE=epdtest CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-	LLVM_PROFILE_FILE=amoeba-%p.profraw ./epdtest -e amoeba -c 4 -f bratko-kopec.epd -d 12
-	$(MAKE) pgo-use EXE=epdtest CPU=$(CPU) POPCOUNT=$(POPCOUNT)
-
-postmortem: $(POSTMORTEM_SRC)
-	$(MAKE) EXE=postmortem CPU=$(CPU) POPCOUNT=$(POPCOUNT) 
-
-
-epdtest: $(EPDTEST_SRC)
-	$(MAKE) EXE=epdtest CPU=$(CPU) POPCOUNT=$(POPCOUNT) 
+perf : $(SRC)
+	$(MAKE) BUILD=perf
 
 cloc:
 	@echo "Amoeba's engine lines of code"
-	countloc $(AMOEBA_SRC)
-	@echo "Amoeba's tuner lines of code"
-	countloc $(TUNE_SRC)
-	@echo "Amoeba's tourney manager lines of code"
-	countloc $(TOURNEY_SRC)
-	@echo "Amoeba's game postmortem analyzer"
-	countloc $(POSTMORTEM_SRC)
-	@echo "Amoeba's epd engine tester"
-	countloc $(EPDTEST_SRC)
+	countloc $(SRC)
 
 clean:
 	$(RM) *.o trace.* *.log *.gcda *.profraw *.profdata
 
 cleanall:
 	$(MAKE) clean
-	$(RM) amoeba-* amoeba postmortem tourney tune epdtest core.*
+	$(RM) amoeba
 
 
 
