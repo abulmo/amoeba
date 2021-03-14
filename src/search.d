@@ -6,165 +6,9 @@
 
 module search;
 
-import board, eval, kpk, move, util;
+import board, eval, kpk, move, tt, util;
 import std.algorithm, std.concurrency, std.parallelism, std.conv, std.format, std.getopt, std.math, std.stdio, std.string, std.traits;
 import core.atomic, core.thread;
-
-/* Hash table score bound */
-enum Bound {none, upper, lower, exact}
-
-/*
- * Entry Table Entry
- */
-struct Entry {
-	uint code;    // zobrist key
-	ushort info;  // date (6 bits) / depth (7 bits) / bound (2 bits) / singular (1 bit)
-	short score;  // from search
-	short value;  // static eval
-	Move[2] move; // 2 best moves
-
-	/* depth */
-	int depth() const @property {
-		return ((info >> 3) & 127);
-	}
-
-	/* bound type */
-	Bound bound() const @property {
-		return cast (Bound) ((info >> 1) & 3);
-	}
-
-	/* aging date */
-	int date() const @property {
-		return (info >> 10);
-	}
-
-	/* aging date */
-	bool singular() const @property {
-		return (info & 1);
-	}
-
-	/* refresh the aging date */
-	void refresh(const int date) {
-		info = cast (ushort) ((info & 1023) | (date << 10));
-	}
-
-	/* store common data to update & set into this entry */
-	void store(const Bound b, const int d, const int date, const bool singular, const int s, const int v) {
-		info = cast (ushort) (singular | (b << 1) | (d << 3) | (date << 10));
-		score = cast (short) s;
-		value = cast (short) v;
-	}
-
-	/* update an existing entry */
-	void update(const int d, const int date, const Bound b, const bool singular, const int s, const int v, const Move m) {
-		store(b, d, date, singular, s, v);
-		if (m != move[0]) { move[1] = move[0]; move[0] = m; }
-	}
-
-	/* set a new entry */
-	void set(const Key k, const int d, const int date, const Bound b, const bool singular, const int s, const int v, const Move m) {
-		code = k.code;
-		store(b, d, date, singular, s, v);
-		move = [m, 0];
-	}
-
-	/* toString */
-	string toString() const {
-		return format("{ key = %016x, singular %s, depth = %s, bound = %s, age = %s, score = %s, move = %s }", code, singular, depth, bound, date, value, move);
-	}
-}
-
-/*
- * Transposition table
- */
-final class TranspositionTable {
-	enum size_t bucketSize = 3;
-	Entry [] entry;
-	size_t mask;
-	ubyte date;
-
-	/* constructor */
-	this(size_t size) {
-		resize(size);
-		clear();
-	}
-
-	/* resize */
-	void resize(size_t size) {
-		const size_t l = 1 << lastBit(size / Entry.sizeof);
-		if (l >= 1) {
-			mask = l - 1;
-			entry.length = mask + bucketSize;
-		} else {
-			entry.length = mask = 0;
-		}
-	}
-
-	/* clear the table */
-	void clear(const bool cleaner = true) {
-		if (cleaner || date == 63) {
-			date = 0;
-			foreach (ref h; entry) {
-				if (cleaner) h = Entry.init;
-				else {
-					h.info = h.info & 1023; // reset date to 0;
-				}
-			}
-		}
-		date = cast (ubyte) (date + 1);
-	}
-
-	/* look for an entry matching the zobrist key */
-	bool probe(const Key k, ref Entry found) {
-		const size_t i = k.index(mask);
-		foreach (ref h; entry[i .. i + bucketSize]) {
-			if (h.code == k.code) {
-				found = h;
-				h.refresh(date);
-				return found.code == k.code;
-			}
-		}
-		return false;
-	}
-
-	/* store search data */
-	void store(const Key k, const int depth, const Bound b, const bool singular, const int v, const int e, const Move m) {
-		const size_t i = k.index(mask);
-		Entry *w = &entry[i];
-		foreach (ref h; entry[i .. i + bucketSize]) {
-			if (h.code == k.code) {
-				h.update(depth, date, b, singular, v, e, m);
-				return;
-			} else if (w.info > h.info) w = &h;
-		}
-		w.set(k, depth, date, b, singular, v, e, m);
-	}
-
-	/* speed up further access */
-	void prefetch(const Key k) {
-		const size_t i = k.index(mask);
-		util.prefetch(cast (void*) &entry[i]);
-
-	}
-
-	/* choose between lower & exact bound */
-	Bound bound(const int v, const int β) const {
-		return v >= β ? Bound.lower : Bound.exact;
-	}
-
-	/* return the size of s the transposition table */
-	size_t size() const @property {
-		return entry.length * Entry.sizeof;
-	}
-
-	/* return how full is the transposition table */
-	int full() const @property {
-		int n = 0;
-		foreach (e; entry[0 .. 1000]) n += (e.info != 0);
-		return n;
-	}
-
-}
 
 /*
  * Search option
@@ -200,7 +44,9 @@ struct Option {
 	bool verbose;
 }
 
-/* search Info */
+/*
+ * Search Info
+ */
 struct Info {
 	Line [Limits.moves.max] pv;
 	ulong nNodes;
@@ -253,7 +99,7 @@ struct Info {
 	}
 
 	/* write the search results found so far using UCI protocol */
-	string toUCI(const int iPv, TranspositionTable tt, const ulong nodes) const {
+	string toUCI(const int iPv, const TranspositionTable* tt, const ulong nodes) const {
 		string s;
 
 		foreach (i; 0 .. multiPv) {
@@ -286,7 +132,7 @@ private:
 	Search *search;
 	Board board;
 	Eval eval;
-	TranspositionTable tt;
+	TranspositionTable *tt;
 	Info info;
 	Moves rootMoves;
 	Line line;
@@ -296,8 +142,9 @@ private:
 	ubyte[32][32] reduction;
 	Move [2][Limits.ply.max + 2] killer;
 	Move [Limits.move.size] refutation;
+	int [Limits.ply.max] value;
 	ulong nNodes;
-	int ply, iPv, selDepth, id;
+	int ply, depth, selDepth, iPv, id;
 
 	Thread thread;
 	shared bool stop;
@@ -354,14 +201,12 @@ private:
 
 	/* get an eval margin to prune */
 	static int margin(const int d) {
-		return d ? 200 * d - 100 : 50;
+		return 200 * d - 100;
 	}
 
 
-	/* error in score prediction by depth r for depth d on quiet position */
+	/* statistical error in score prediction by depth r for depth d on quiet position */
 	static int error(const int d, const int r) {
-		claim(r < d);
-
 		double a = 0.09 * r + 1.94;
 		double b = -5.74 * r + 48.52;
 
@@ -370,22 +215,18 @@ private:
 
 	/* quiescence search */
 	int qs(int α, int β) {
-		enum δ = margin(0);
+		enum δ = 50;
 		const bool isPv = (α + 1 < β);
 		int s, bs, v = Score.mate;
 		Moves moves = void;
 		Move m;
 		Entry h;
 
-		// stop
-		if (stop) return α;
-
 		// drawn position ?
 		if (board.isDraw) return 0;
 
 		// distance to mate pruning
 		bs = ply - Score.mate;
-		if (bs > α && (α = bs) >= β) return bs;
 		s = Score.mate - ply - 1;
 		if (s < β && (β = s) <= α) return s;
 
@@ -398,6 +239,7 @@ private:
 			v = fromHash(h.value);
 			if ((h.bound != Bound.upper && s > v) || (h.bound != Bound.lower && s < v)) v = s;
 		} else v = eval(board, α, β);
+		value[ply] = v;
 
 		// standpat
 		const αOld = α;
@@ -409,7 +251,7 @@ private:
 		//max depth reached
 		if (ply == Limits.ply.max) return v;
 
-		if (ply > selDepth) selDepth = ply;
+		if (isPv && ply > selDepth) selDepth = ply;
 
 		// move generation: good captures & promotions if not in check
 		moves.setup(board.inCheck, h.move);
@@ -435,28 +277,26 @@ private:
 	}
 
 	/* alpha-beta search (PVS/negascout variant) */
-	int αβ(int α, int β, const int d, const Move excludeMove = 0) {
+	int pvs(int α, int β, const int d, const Move excludeMove = 0) {
 		const bool isPv = (α + 1 < β);
 		int v, s, bs, e, r, iQuiet;
 		Moves moves = void;
 		MoveItem i = void;
 		Move m;
 		Entry h;
-		bool isSingular = false;
+		bool isextended = false;
 		const Key key = board.key.exclude(excludeMove);
+
+		if (stop) return α;
 
 		// qs search
 		if (d <= 0) return qs(α, β);
-
-		// stop
-		if (stop) return α;
 
 		// draw
 		if (board.isDraw) return 0;
 
 		// distance to mate
 		bs = ply - Score.mate;
-		if (bs > α && (α = bs) >= β) return bs; // never happens
 		s = Score.mate - ply - 1;
 		if (s < β && (β = s) <= α) return s;
 
@@ -472,21 +312,27 @@ private:
 			v = fromHash(h.value);
 			if ((h.bound != Bound.upper && s > v) || (h.bound != Bound.lower && s < v)) v = s;
 		} else v = eval(board, α, β);
+		value[ply] = v;
 
 		// max depth reached
 		if (ply == Limits.ply.max) return v;
 
-		// selective search: "frontier" node pruning & null move
-		bool isSafe = !(isPv || board.inCheck || α >= Score.high || β <= Score.low);
-		if (isSafe && excludeMove == 0) {
+		// selective search: "frontier" node pruning & null move & probcut
+		const bool tactical = (board.inCheck || abs(v) >= Score.big || α >= Score.big || β <= -Score.big);
+		const bool suspicious = (isPv || (ply >= 2 && value[ply] > value[ply - 2]));
+
+		if (!tactical && !isPv) {
 			// pruning
 			const int  δ = margin(d);
 			const int sα = α - δ;
 
 			// razoring (our position is so bad, no need to search further)
-			if (v <= sα && (s = qs(sα, sα + 1)) <= sα) return α;
+			if (v <= sα) {
+				if (d <= 2) return qs(α, β);
+				else if (qs(sα, sα + 1) <= sα) return α;
+			}
 
-			if (board.color[board.player] & ~(board.piece[Piece.pawn] | board.piece[Piece.king])) {
+			if (board.nonPawnPiece(board.player)) {
 				// eval pruning (our position is very good, no need to search further)
 				if (v >= β + δ && v < Score.high) return v;
 
@@ -494,14 +340,13 @@ private:
 				if (d >= 2 && v >= β) {
 					r = 3 + d / 4 + min((v - β) / 128, 3);
 					update(0);
-						s = -αβ(-β, -β + 1, d - r);
+						s = -pvs(-β, -β + 1, d - r);
 					restore(0);
 					if (stop) return α;
 					if (s >= β) {
 						if (s >= Score.high) s = β;
-						if (d < 8 ||  (s = αβ(β - 1, β, d - r)) >= β) return s;
+						if (d < 8 ||  (s = pvs(β - 1, β, d - r)) >= β) return s;
 					}
-					isSafe = (s > -Score.big);
 				}
 			}
 
@@ -514,7 +359,7 @@ private:
 					if (m == excludeMove || board.see(m) < 0) continue;
 					update(m);
 						s = -qs(-λ, -λ + 1);
-						if (s >= λ) s = -αβ(-λ, -λ + 1, d - r);
+						if (s >= λ) s = -pvs(-λ, -λ + 1, d - r);
 					restore(m);
 					if (stop) return α;
 					if (s >= λ) return β;
@@ -537,43 +382,41 @@ private:
 			iQuiet += isQuiet;
 
 			// late move pruning
-			if (isSafe && isQuiet && iQuiet > 4 + d * d && !board.giveCheck(m)) continue;
+			if (!tactical && isQuiet && iQuiet > (4 + d * d) / (2 - suspicious) && !board.giveCheck(m)) continue;
 			// see pruning
-			if (isSafe && d < 4 && iQuiet > 4 && board.see(m) < 0) continue;
+			if (!tactical && !suspicious && d < 4 && iQuiet > 4 && board.see(m) < 0) continue;
 
-			// singular move
-			if (d >= 8 && !excludeMove && m == h.move[0] && h.depth >= d - 4 && h.bound != Bound.upper) {
-				e = (h.singular && h.depth >= d);
-				if (e == 0) {
-					const int λ = h.score - 2 * d - 1;
-					r = max(4, 2 + d / 4);
-					if (λ >= Score.low) {
-						s = αβ(λ, λ + 1, d - r, m);
-						e = (s <= λ);
-					}
+			// depth extension
+			e = (h.extended && h.depth >= d);
+			// singular move extension
+			if (!e && d >= 8 && !excludeMove && m == h.move[0] && h.depth >= d - 4 && h.bound != Bound.upper) {
+				const int λ = h.score - 2 * d - 1;
+				r = 2 + d / 4;
+				if (λ >= Score.low) {
+					s = pvs(λ, λ + 1, d - r, m);
+					e = (s <= λ);
 				}
-				isSingular = (e > 0);
 			} else {
 				// check extension (if move is not losing or turbulent)
-				e = (board.giveCheck(m) && (board.see(m) >= 0 || !isSafe));
+				e = (board.giveCheck(m) && (board.see(m) >= 0 || !tactical));
 			}
 
-			if (isPv) pv[ply + 1].clear();
+			pv[ply + 1].clear();
 			killer[ply + 2] = [0, 0];
 
 			update(m);
 				// principal variation search (pvs)
 				if (moves.isFirst(m)) {
-					s = -αβ(-β, -α, d + e - 1);
+					s = -pvs(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
 					r = isQuiet ? reduce(d, iQuiet) : 0;
-					if (r && (isPv || history.isGood(board[m.to], m.to))) --r;
+					if (r && (suspicious || history.isGood(board[m.to], m.to))) --r;
 					// null window search (nws)
-					s = -αβ(-α - 1, -α, d + e - r - 1);
+					s = -pvs(-α - 1, -α, d + e - r - 1);
 					// new pv found or new bestscore (bs) at reduced depth ?
 					if ((α < s && s < β) || (s > bs && r > 0)) {
-						s = -αβ(-β, -α, d + e - 1);
+						s = -pvs(-β, -α, d + e - 1);
 					}
 				}
 			restore(m);
@@ -582,7 +425,7 @@ private:
 
 			// best move ?
 			if (s > bs && (bs = s) > α) {
-				tt.store(key, d, tt.bound(bs, β), isSingular, toHash(bs), toHash(v), m);
+				tt.store(key, d, tt.bound(bs, β), (e > 0), toHash(bs), toHash(v), m);
 				if (isPv) pv[ply].set(m, pv[ply + 1]);
 				if ((α = bs) >= β) {
 					if (!board.isTactical(m) && !board.inCheck && !excludeMove) heuristicsUpdate(moves, m, d);
@@ -597,13 +440,13 @@ private:
 			else return 0;
 		}
 
-		if (bs <= αOld) tt.store(key, d, Bound.upper, isSingular, toHash(bs), toHash(v), moves[0]);
+		if (bs <= αOld) tt.store(key, d, Bound.upper, isextended, toHash(bs), toHash(v), moves[0]);
 
 		return bs;
 	}
 
 	/* alpha-beta search at root level */
-	void αβRoot(int α, const int β, const int d) {
+	void pvsRoot(int α, const int β, const int d) {
 		const αOld = α;
 		int s, bs = -Score.mate, e, r, iQuiet;
 		const int v = eval(board, α, β);
@@ -623,15 +466,15 @@ private:
 			update(m);
 				// principal variation search (pvs)
 				if (i == iPv) {
-					s = -αβ(-β, -α, d + e - 1);
+					s = -pvs(-β, -α, d + e - 1);
 				} else {
 					// late move reduction (lmr)
 					r = isQuiet ? reduce(d, iQuiet) : 0;
 					// null window search (nws)
-					s = - αβ(-α - 1, -α, d + e - r - 1);
+					s = - pvs(-α - 1, -α, d + e - r - 1);
 					// new pv ?
 					if ((α < s && s < β) || (s > bs && r > 0)) {
-						s = -αβ(-β, -α, d + e - 1);
+						s = -pvs(-β, -α, d + e - 1);
 					}
 				}
 			restore(m);
@@ -642,12 +485,10 @@ private:
 				pv[0].set(m, pv[1]);
 				info.store(iPv, s, d, selDepth, pv[0]);
 				if (iPv == 0) tt.store(board.key, d, tt.bound(bs, β), false, toHash(bs), toHash(v), m);
-				if (isMaster && d > 10 && iPv == 0) search.toUCI();
 				if ((α = bs) >= β) break;
 			} else if (i == iPv) {
 				pv[0].set(m, pv[1]);
 				info.store(iPv, s, d, selDepth, pv[0]);
-				if (isMaster && d > 10 && iPv == 0) search.toUCI();
 			}
 		}
 
@@ -659,12 +500,12 @@ private:
 		int λ, υ, δ = +10; // todo width depend on score ?
 
 		if (d <= 4) {
-			αβRoot(α, β, d);
+			pvsRoot(α, β, d);
 		} else {
 			λ = info.score[iPv] - δ; υ = info.score[iPv] + δ;
 			for (; !stop; δ *= 2) {
 				λ = max(α, λ); υ = min(β, υ);
-				αβRoot(λ, υ, d);
+				pvsRoot(λ, υ, d);
 				if (info.score[iPv] <= λ && λ > α) {
 					if (isMaster && !search.option.isPondering && search.time > 0.3 * search.option.time.max) search.option.time.max = search.option.time.extra;
 					υ = (λ + υ) / 2; λ = info.score[iPv] - δ;
@@ -708,11 +549,10 @@ private:
 
 	// iterative deepening
 	void iterate() {
-		int d;
 		if (search.message) search.message.log("smp > task[", id, "] iterate");
-		for (d = search.option.depth.begin; persist(d); ++d) {
-			if (id > 0 && d < search.option.depth.end && (id + d) % 4 == 0) continue;
-			multiPv(search.option.multiPv, d);
+		for (depth = search.option.depth.begin; persist(depth); ++depth) {
+			if (id > 0 && depth < search.option.depth.end && (id + depth) % 4 == 0) continue;
+			multiPv(search.option.multiPv, depth);
 		}
 		stop = true;
 		if (search.message) search.message.log("smp> task[", id, "] finished: ", info.toUCI(search.option.multiPv, tt, nNodes));
@@ -742,9 +582,10 @@ private:
 	}
 
 	/* start the search */
-	void go(Moves moves) {
+	void go(Moves moves, const int score) {
 		setup();
 		if (moves.length > 0) rootMoves = moves;
+		info.score[0] = score;
 		if (search.message) search.message.log("smp> task[", id, "] launched");
 		thread = new Thread((){iterate();});
 		thread.start();
@@ -799,7 +640,7 @@ private:
 struct Search {
 	Task [] tasks;
 	Task *master;
-	TranspositionTable tt;
+	TranspositionTable *tt;
 	Option option;
 	Chrono timer;
 	Message message;
@@ -893,7 +734,7 @@ struct Search {
 			if (master.isBestmoveObvious()) option.depth.end = option.depth.begin;
 
 			// make the tasks search and wait for its termination
-			foreach (ref t; tasks) t.go(moves);
+			foreach (ref t; tasks) t.go(moves, h.score);
 			while (keepSearching()) Thread.sleep(1.msecs);
 
 			// terminate the tasks
@@ -911,7 +752,7 @@ struct Search {
 	void go(const int d) {
 		timer.start();
 			master.setup();
-			master.info.score[0] = master.αβ(2 - Score.mate, Score.mate - 1, d);
+			master.info.score[0] = master.pvs(2 - Score.mate, Score.mate - 1, d);
 		timer.stop();
 	}
 
@@ -964,7 +805,7 @@ struct Search {
 	}
 
 	//* test the speed of the search up to depth d */
-	void bench(const int depth) {
+	void bench(const int depth, const CPUAffinity affinity, const int loop) {
 		// bratko - kopeck position set
 		string [24] fens = [
 			"1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -",
@@ -992,24 +833,37 @@ struct Search {
 			"r1bqk2r/pp2bppp/2p5/3pP3/P2Q1P2/2N1B3/1PP3PP/R4RK1 b kq -",
 			"r2qnrnk/p2b2b1/1p1p2pp/2pPpp2/1PP1P3/PRNBB3/3QNPPP/5RK1 w - -"
 		];
-		Option o = { {double.infinity, double.infinity}, {ulong.max}, {1, depth}, {0},  {totalCPUs, {0, 0}}, 1, false, false, false };
-		ulong n;
-		double t = 0.0;
+		Option o = { {double.infinity, double.infinity}, {ulong.max}, {1, depth}, {0},  {totalCPUs, affinity}, 1, false, false, false };
 		Board board = new Board;
 		Moves moves = void;
+		double N, N2, T, T2, V, V2;
 
 		moves.clear();
 
-		foreach (fen; fens) {
-			board.set(fen);
-			clear();
-			position(board);
-			go(o, moves);
-			n += countNodes;
-			t += time;
+		N = N2 = T = T2 = V = V2 = 0.0;
+		foreach (l; 0 .. loop) {
+			ulong n;
+			double t = 0.0;
+			foreach (fen; fens) {
+				board.set(fen);
+				clear();
+				position(board);
+				go(o, moves);
+				n += countNodes;
+				t += time;
+			}
+			if (loop > 1) write("loop ", l, " "); else write("bench: ");
+			writeln("depth: ", depth, "; ", n, " nodes in ", t, " s, ", cast (int) (n / t), " nps.");
+			N += n; N2 += n * n;
+			T += t; T2 += t * t;
+			V += n / t; V2 += (n * n) / (t * t);
 		}
-
-		writeln("bench: depth: ", depth, "; ", n, " nodes in ", t, " s, ", cast (int) (n / t), " nps.");
+		if (loop > 1) {
+			N /= loop; N2 /= loop; 
+			T /= loop; T2 /= loop;
+			V /= loop; V2 /= loop;
+			writeln("bench: depth: ", depth, "; ", cast (long) N, " +/-", sqrt(N2 - N * N), " nodes in ", T, " +/-", sqrt(T2 - T * T), " s, ", cast (int) (N / T), " nps +/-", sqrt(V2 - V * V), ".");
+		}
 	}
 }
 
@@ -1017,24 +871,26 @@ struct Search {
 void bench(string [] arg, ref Search search) {
 	int depth = 18;
 	size_t hashSize = 256;
-	int cpu = 1;
+	int cpu = 1, loop = 1;
 	bool help = false;
-	string affinity = "";
+	CPUAffinity affinity;
+	string a = "";
 
-	getopt(arg, "depth|d", &depth, "hash|H", &hashSize, "cpu|c", &cpu, "affinity|a", &affinity, "help|h", &help);
+	getopt(arg, "depth|d", &depth, "hash|H", &hashSize, "cpu|c", &cpu, "affinity|a", &a, "loop|l", &loop, "help|h", &help);
 	if (help) {
-		writeln("bench  [--depth|-d <depth>] [--hash|-H <hashsize>] [--cpu|-c] <threads>] [--affinity|-a <[o:]s>] [--help|-h]");
+		writeln("bench  [--depth|-d <depth>] [--hash|-H <hashsize>] [--cpu|-c] <threads>] [--affinity|-a <[o:]s>] | [--loop|-l <n>] | [--help|-h]");
 		writeln("Test the speed of the search on the bratko-kopeck test. Options");
 		writeln("    --depth|-d <depth>     Search at depth d (default: 18)");
 		writeln("    --hash|-H <Mb>         Set default HashSize");
 		writeln("    --cpu|-c <threads>     Set default number of threads\n");
+		writeln("    --loop|-l <n>          repeat the bench <n> times\n");
 		writeln("    --affinity|-a <[o:]s>  Set cpu affinity as 'offset:step'");
 		writeln("    --help|-h              Display this help");
 	}
 
 	if (hashSize.MBytes != search.tt.mask + 1) search.resize(hashSize.MBytes);
 	if (search.tasks.length != cpu) search.threads(cpu);
-	if (affinity != "") search.option.cpu.affinity.set(affinity);
-	search.bench(depth);
+	if (a != "") affinity.set(a);
+	search.bench(depth, affinity, loop);
 }
 
