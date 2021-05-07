@@ -90,7 +90,7 @@ struct TranspositionTable {
 
 	/* resize */
 	void resize(size_t size) {
-		const size_t l = 1 << lastBit(size / Entry.sizeof);
+		const size_t l = 1UL << lastBit(size / Entry.sizeof);
 		if (l >= 1) {
 			mask = l - 1;
 			entry.length = mask + bucketSize;
