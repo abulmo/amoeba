@@ -244,7 +244,7 @@ private:
 		if (p > Piece.pawn) --s.nPiece[c];
 		else s.pawnCenter.remove(x);
 		s.stage -= stageValue[p];
-		s.materialIndex[c] -= 1 << (4 * p);
+		s.materialIndex[c] -= 1u << (4 * p);
 	}
 
 	/* set a piece */
@@ -254,7 +254,7 @@ private:
 		if (p > Piece.pawn) ++s.nPiece[c];
 		else s.pawnCenter.set(x);
 		s.stage += stageValue[p];
-		s.materialIndex[c] += 1 << (4 * p);
+		s.materialIndex[c] += 1u << (4 * p);
 	}
 
 	/* move a piece */
@@ -790,8 +790,9 @@ public:
 	}
 
 	/* resize the pawn hash table */
-	void resize(size_t size) {
-		pawnTable.length = 1 << lastBit(size / Entry.sizeof);
+	void resize(const size_t size) {
+		size_t s = clamp(size, 65_536, 67_108_864);
+		pawnTable.length = 1UL << lastBit(s / Entry.sizeof);
 		clear();
 	}
 
