@@ -11,7 +11,7 @@ import std.algorithm, std.array, std.conv, std.concurrency, std.parallelism, std
 import core.thread;
 
 /* version */
-enum string versionNumber = "3.3";
+enum string versionNumber = "3.3.1";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -124,7 +124,6 @@ final class Uci {
 		message.send("option name Clear Hash type button");
 		message.send("option name Threads type spin default ", nThreads, " min 1 max 256");
 		message.send("option name Affinity type string default ", affinity);
-		message.send("option name Log type check default ", message.isLogging());
 		message.send("option name MultiPV type spin default 1 min 1 max 256");
 		message.send("option name UCI_AnalyseMode type check default false");
 		// add more options here...
@@ -143,10 +142,6 @@ final class Uci {
 		else if (option == "multipv") multipv = clamp(to!int(value), 1, 256);
 		else if (option == "uci_analysemode") easy = !to!bool(value);
 		else if (option == "affinity") affinity = value;
-		else if (option == "log") {
-			if (to!bool(value)) message.logOn();
-			else message.logOff();
-		}
 		else message.send("info error ", option, " is not a known option");
 			
 	}
