@@ -139,7 +139,7 @@ public:
 	MoveItem [Limits.moves.max] item;
 	size_t index;
 private:
-	enum Stage {ttMove1, ttMove2, captureGeneration, captureSelection, killer1, killer2, refutation, quietGeneration, evasionGeneration, moveSelection }
+	enum Stage {ttMove1, ttMove2, captureGeneration, captureSelection, killer1, refutation, killer2, quietGeneration, evasionGeneration, moveSelection }
 	size_t n;
 	bool captureOnly;
 	Move [2] ttMove;
@@ -268,7 +268,7 @@ public:
 		// best move from transposition table
 		case Stage.ttMove1:
 			stage = Stage.ttMove2;
-			if (board.isLegal(ttMove[0])) {
+			if (ttMove[0] && board.isLegal(ttMove[0])) {
 				push(ttMove[0], ttBonus);
 				break;
 			} else goto case;
@@ -276,7 +276,7 @@ public:
 		// second best move from transposition table
 		case Stage.ttMove2:
 			stage = Stage.captureGeneration;
-			if (board.isLegal(ttMove[1])) {
+			if (ttMove[1] && board.isLegal(ttMove[1])) {
 				push(ttMove[1], ttBonus - 1);
 				break;
 			} else goto case;
@@ -305,25 +305,25 @@ public:
 			}
 		// killer 1
 		case Stage.killer1:
-			stage = Stage.killer2;
-			if (board.isLegal(killer[0]) && !board.isTactical(killer[0]) && killer[0] != ttMove[0] && killer[0] != ttMove[1]) {
-				include(killer[0], killerBonus);
-				break;
-			} else goto case;
-
-		// killer 2
-		case Stage.killer2:
 			stage = Stage.refutation;
-			if (board.isLegal(killer[1]) && !board.isTactical(killer[1]) && killer[1] != ttMove[0] && killer[1] != ttMove[1]) {
-				include(killer[1], killerBonus - 1);
+			if (killer[0] && board.isLegal(killer[0]) && !board.isTactical(killer[0]) && killer[0] != ttMove[0]	&& killer[0] != ttMove[1]) {
+				include(killer[0], killerBonus);
 				break;
 			} else goto case;
 
 		// refutation
 		case Stage.refutation:
+			stage = Stage.killer2;
+			if (refutation && board.isLegal(refutation) && !board.isTactical(refutation) && refutation != ttMove[0] && refutation != ttMove[1] && refutation != killer[0]) {
+				include(refutation, killerBonus - 1);
+				break;
+			} else goto case;
+
+		// killer 2
+		case Stage.killer2:
 			stage = Stage.quietGeneration;
-			if (board.isLegal(refutation) && !board.isTactical(refutation) && refutation != ttMove[0] && refutation != ttMove[1] && refutation != killer[0] && refutation != killer[1]) {
-				include(refutation, killerBonus - 2);
+			if (killer[1] && board.isLegal(killer[1]) && !board.isTactical(killer[1]) && killer[1] != ttMove[0] && killer[1] != ttMove[1]  && killer[1] != killer[0] && killer[1] != refutation) {
+				include(killer[1], killerBonus - 2);
 				break;
 			} else goto case;
 
