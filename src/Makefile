@@ -48,7 +48,7 @@ ifeq ($(DC),ldc2)
 	else ifeq ($(BUILD),slow)
 		DFLAGS += -O -release -boundscheck=off
 	else ifeq ($(BUILD),debug)
-		DFLAGS = -O0 -g -gc --checkaction=C
+		DFLAGS = -O0 -g -gc --checkaction=C -d-debug
 	else ifeq ($(BUILD),perf)
 		DFLAGS = -O1 -boundscheck=off
 	else ifeq ($(BUILD),cov)
@@ -106,6 +106,9 @@ debug : $(SRC)
 
 perf : $(SRC)
 	$(MAKE) amoeba BUILD=perf
+
+cov : $(SRC)
+	$(MAKE) amoeba BUILD=cov
 
 cloc:
 	@echo "Amoeba's engine lines of code"
