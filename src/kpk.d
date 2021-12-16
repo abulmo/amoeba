@@ -1,7 +1,7 @@
 /*
  * file kpk.d
  * KPK base
- * © 2016-2020 Richard Delorme
+ * © 2016-2021 Richard Delorme
  */
 
 module kpk;
@@ -45,7 +45,7 @@ void init () {
 	Color player, enemy;
 
 	// init attacks mask
-	foreach(x; Square.a1 .. Square.size) {
+	foreach (x; Square.a1 .. Square.size) {
 		if (0 < rank(x) && rank(x) < 7) {
 			if (file(x) > 0) attacks[x].pawn |= bit(x + 7);
 			if (file(x) < 7) attacks[x].pawn |= bit(x + 9);
