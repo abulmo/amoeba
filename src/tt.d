@@ -1,7 +1,7 @@
 /*
  * File tt.d
  * Transposition Table.
- * © 2016-2020 Richard Delorme
+ * © 2016-2021 Richard Delorme
  */
 
 module tt;
@@ -12,8 +12,8 @@ import std.format;
 /* Hash table score bound */
 enum Bound {none, upper, lower, exact}
 
-/* 
- * Hash Table Entry 
+/*
+ * Hash Table Entry
  */
 struct Entry {
 	uint code;    // zobrist key
@@ -21,6 +21,7 @@ struct Entry {
 	short score;  // from search
 	short value;  // static eval
 	Move[2] move; // 2 best moves
+	short _;      // padding;
 
 	/* depth */
 	int depth() const @property {
