@@ -1,15 +1,12 @@
 /*
  * File util.d
  * Miscellaneous utilities
- * © 2016-2020 Richard Delorme
+ * © 2016-2021 Richard Delorme
  */
 
 module util;
 import std.array, std.conv, std.datetime, std.format, std.parallelism, std.process, std.stdio, std.string;
 import core.bitop, core.simd, core.time, core.thread, core.stdc.stdlib;
-
-version (LDC) import ldc.intrinsics;
-else version (GNU) import gcc.builtins;
 
 /* limits */
 struct Limits {
@@ -34,9 +31,7 @@ enum Loop {off = false, on}
  * bit utilities
  */
 /* Swap the bytes of a bitboard (vertical mirror of a Chess board) */
-version (LDC) alias swapBytes = llvm_bswap;
-else version(GNU) alias swapBytes = __builtin_bswap64;
-else alias swapBytes = bswap;
+alias swapBytes = bswap;
 
 /* Check if a single bit is set */
 bool hasSingleBit(const ulong b) {
@@ -44,9 +39,7 @@ bool hasSingleBit(const ulong b) {
 }
 
 /* Get the first bit set */
-version (LDC) int firstBit(ulong b) { return cast (int) llvm_cttz(b, true); }
-else version (GDC) alias firstBit = __builtin_ctz;
-else alias firstBit = bsf;
+alias firstBit = bsf;
 
 /* Get the last bit set */
 alias lastBit = bsr;
@@ -58,11 +51,16 @@ int popBit(ref ulong b) {
 	return i;
 }
 
+/* Extract a bit */
+int reversePopBit(ref ulong b) {
+	const int i = lastBit(b);
+	b ^= 1UL << i ;
+	return i;
+}
+
 /* Count the number of bits */
 version (withPopCount) {
-	version (GNU) alias countBits = __builtin_popcountll;
-	else version (LDC) int countBits(const ulong b) {return cast (int) llvm_ctpop(b);}
-	else alias countBits = _popcnt;
+	alias countBits = _popcnt;
 } else {
 	int countBits(const ulong b) {
 		ulong c = b
@@ -79,9 +77,7 @@ version (withPopCount) {
  * prefetch
  */
 void prefetch(void *v) {
-	version (GNU) __builtin_prefetch(v);
-	else version (LDC) llvm_prefetch(v, 0, 3, 1);
-	else core.simd.prefetch!(false, 3)(v);
+	core.simd.prefetch!(false, 3)(v);
 }
 
 
