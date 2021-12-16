@@ -1,7 +1,7 @@
 /*
  * File search.d
  * Best move search.
- * © 2016-2020 Richard Delorme
+ * © 2016-2021 Richard Delorme
  */
 
 module search;
@@ -22,11 +22,7 @@ struct Option {
 		ulong max;
 	}
 	struct Depth {
-		int begin;
-		int end;
-	}
-	struct Score {
-		int begin;
+		int max;
 	}
 	struct CPU {
 		int max;
@@ -35,13 +31,19 @@ struct Option {
 
 	Time time;
 	Nodes nodes;
-	Depth depth;
-	Score score;
+	Depth depth, mate;
 	CPU cpu;
 	int multiPv;
 	bool easy;
 	bool isPondering;
 	bool verbose;
+}
+
+int cpToMate(const int score) {
+	int mate = int.max;
+	if (score > Score.high) mate = (Score.mate + 1 - score) / 2;
+	else if (score < Score.low) mate = -(Score.mate + score) / 2;
+	return mate;
 }
 
 /*
@@ -54,9 +56,9 @@ struct Info {
 	int [Limits.moves.max] score, depth, selDepth;
 	int multiPv;
 
-	/* save current search infos (except pv / score) */
-	void update(const ulong n, const int d, const double t) {
-		nNodes = n; depth = d; time = t;
+	/* save current search infos (except pv / score / depth) */
+	void update(const ulong n, const double t) {
+		nNodes = n; time = t;
 	}
 
 	/* save current search infos (pv + score) */
@@ -90,12 +92,11 @@ struct Info {
 	}
 
 	/* clear results */
-	void clear(const int n, const int scoreInit) {
+	void clear(const int n) {
 		nNodes = 0; time = 0.0;
 		multiPv = n;
 		depth[] = 0; selDepth[] = 0; score[] = 0;
 		foreach (i; 0 .. multiPv) pv[i].clear();
-		score[0] = scoreInit;
 	}
 
 	/* write the search results found so far using UCI protocol */
@@ -107,8 +108,7 @@ struct Info {
 			s ~= " seldepth " ~ to!string(selDepth[i]);
 			if (multiPv > 1) s ~= " multipv " ~ to!string(i + 1);
 			s ~= " score ";
-			if (score[i] > Score.high) s ~= "mate " ~ to!string((Score.mate + 1 - score[i]) / 2);
-			else if (score[i] < Score.low) s ~= "mate " ~ to!string(-(Score.mate + score[i]) / 2);
+			if (score[i] > Score.high || score[i] < Score.low) s ~= "mate " ~ to!string(cpToMate(score[i]));
 			else if (score[i] < 0) s ~= "cp " ~ to!string(score[i] / 2);
 			else s ~= "cp " ~ to!string(score[i]);
 			s ~= " time " ~ to!string(cast (ulong) (1000 * time));
@@ -222,6 +222,8 @@ private:
 		Move m;
 		Entry h;
 
+		if (isPv && ply > selDepth) selDepth = ply;
+
 		// drawn position ?
 		if (board.isDraw) return 0;
 
@@ -250,8 +252,6 @@ private:
 
 		//max depth reached
 		if (ply == Limits.ply.max) return v;
-
-		if (isPv && ply > selDepth) selDepth = ply;
 
 		// move generation: good captures & promotions if not in check
 		moves.setup(board.inCheck, h.move);
@@ -284,13 +284,15 @@ private:
 		MoveItem i = void;
 		Move m;
 		Entry h;
-		bool isextended = false;
 		const Key key = board.key.exclude(excludeMove);
 
 		if (stop) return α;
 
 		// qs search
 		if (d <= 0) return qs(α, β);
+
+		// selective depth
+		if (isPv && ply > selDepth) selDepth = ply;
 
 		// draw
 		if (board.isDraw) return 0;
@@ -321,6 +323,7 @@ private:
 		const bool tactical = (board.inCheck || abs(v) >= Score.big || α >= Score.big || β <= -Score.big);
 		const bool suspicious = (isPv || (ply >= 2 && value[ply] > value[ply - 2]));
 
+		// pruning
 		if (!tactical && !isPv) {
 			// pruning
 			const int  δ = margin(d);
@@ -387,7 +390,7 @@ private:
 			if (!tactical && !suspicious && d < 4 && iQuiet > 4 && board.see(m) < 0) continue;
 
 			// depth extension
-			e = (h.extended && h.depth >= d);
+			e = (h.extended && h.depth >= d && m == h.move[0]);
 			// singular move extension
 			if (!e && d >= 8 && !excludeMove && m == h.move[0] && h.depth >= d - 4 && h.bound != Bound.upper) {
 				const int λ = h.score - 2 * d - 1;
@@ -440,7 +443,7 @@ private:
 			else return 0;
 		}
 
-		if (bs <= αOld) tt.store(key, d, Bound.upper, isextended, toHash(bs), toHash(v), moves[0]);
+		if (bs <= αOld) tt.store(key, d, Bound.upper, false, toHash(bs), toHash(v), moves[0]);
 
 		return bs;
 	}
@@ -478,7 +481,7 @@ private:
 					}
 				}
 			restore(m);
-			info.update(nNodes, d, search.time);
+			info.update(nNodes, search.time);
 			if (stop) return;
 			if (s > bs && (bs = s) > α) {
 				rootMoves.setBest(m, iPv);
@@ -497,7 +500,7 @@ private:
 
 	/* aspiration window */
 	void aspiration(const int α, const int β, const int d) {
-		int λ, υ, δ = +10; // todo width depend on score ?
+		int λ, υ, δ = +10;
 
 		if (d <= 4) {
 			pvsRoot(α, β, d);
@@ -537,9 +540,10 @@ private:
 
 	/* check if search must continue */
 	bool persist(const int d) const {
+		const int mate = cpToMate(info.score[0]);
 		return (search.option.isPondering || (id > 0 || search.time < 0.7 * search.option.time.max))
-		    && !stop && d <= search.option.depth.end
-		    && (search.option.multiPv > 1 || (info.score[0] <= Score.mate - (d - 4) && info.score[0] >= (d - 4) - Score.mate));
+		    && !stop && d <= search.option.depth.max
+		    && (search.option.multiPv > 1 || (mate > search.option.mate.max && (search.option.mate.max > 0 || mate >= (d - 3)/ 2)));
 	}
 
 	// is this position's bestmove obvious (when a single move is legal) ?
@@ -550,8 +554,8 @@ private:
 	// iterative deepening
 	void iterate() {
 		if (search.message) search.message.log("smp > task[", id, "] iterate");
-		for (depth = search.option.depth.begin; persist(depth); ++depth) {
-			if (id > 0 && depth < search.option.depth.end && (id + depth) % 4 == 0) continue;
+		for (depth = 1; persist(depth); ++depth) {
+			if (id > 0 && (id + depth) % 4 == 0) continue;
 			multiPv(search.option.multiPv, depth);
 		}
 		stop = true;
@@ -565,7 +569,7 @@ private:
 		ply = 0;
 		nNodes = 0;
 		stop = false;
-		info.clear(search.option.multiPv, search.option.score.begin);
+		info.clear(search.option.multiPv);
 		history.rescale(8);
 		iPv = 0;
 	}
@@ -657,7 +661,7 @@ struct Search {
 	/* return the node count sum */
 	ulong countNodes() {
 		ulong n = 0;
-		foreach(ref t; tasks) n += t.nNodes;
+		foreach (ref t; tasks) n += t.nNodes;
 		return n;
 	}
 
@@ -691,7 +695,7 @@ struct Search {
 		uint i = 0;
 		tasks.length = n;
 
-		foreach(ref t; tasks) t.clone(&this, i++);
+		foreach (ref t; tasks) t.clone(&this, i++);
 		master = &tasks[0];
 		eval = master.eval;
 	}
@@ -699,25 +703,25 @@ struct Search {
 	/* resize the tt */
 	void resize(const size_t size) {
 		tt.resize(size);
-		foreach(ref t; tasks) t.eval.resize(size / 32);
+		foreach (ref t; tasks) t.eval.resize(size / 32);
 		if (message) message.log("Transposition: size = ", tt.size, ", entries = ", tt.entry.length);
 	}
 
 	/* set eval weights */
-	void setWeight(const double [] weights) {
-		foreach(ref t; tasks) t.eval.setWeight(weights);
+	void setWeight(const Eval.Weight weight) {
+		foreach (ref t; tasks) t.eval.coeff = weight;
 
 	}
 
 	/* set a new board position */
 	void position(Copy copy = Copy.on)(Board board) {
-		foreach(ref t; tasks) t.position!copy(board);
+		foreach (ref t; tasks) t.position!copy(board);
 	}
 
 	/* set a new board position */
 	void clear(bool cleaner = true) {
 		tt.clear(cleaner);
-		foreach(ref t; tasks) t.clear();
+		foreach (ref t; tasks) t.clear();
 	}
 
 	/* search according to some option settings */
@@ -729,9 +733,8 @@ struct Search {
 			// set up the search
 			clear(false);
 			option = o;
-			if (moves.length == 0 && tt.probe(master.board.key, h)) option.depth.begin = h.depth - (h.bound != Bound.exact);
-			else option.depth.begin = 1;
-			if (master.isBestmoveObvious()) option.depth.end = option.depth.begin;
+
+			if (master.isBestmoveObvious()) option.depth.max = 1;
 
 			// make the tasks search and wait for its termination
 			foreach (ref t; tasks) t.go(moves, h.score);
@@ -833,7 +836,7 @@ struct Search {
 			"r1bqk2r/pp2bppp/2p5/3pP3/P2Q1P2/2N1B3/1PP3PP/R4RK1 b kq -",
 			"r2qnrnk/p2b2b1/1p1p2pp/2pPpp2/1PP1P3/PRNBB3/3QNPPP/5RK1 w - -"
 		];
-		Option o = { {double.infinity, double.infinity}, {ulong.max}, {1, depth}, {0},  {totalCPUs, affinity}, 1, false, false, false };
+		Option o = { {double.infinity, double.infinity}, {ulong.max}, {depth},  {0}, {totalCPUs, affinity}, 1, false, false, false };
 		Board board = new Board;
 		Moves moves = void;
 		double N, N2, T, T2, V, V2;
@@ -859,7 +862,7 @@ struct Search {
 			V += n / t; V2 += (n * n) / (t * t);
 		}
 		if (loop > 1) {
-			N /= loop; N2 /= loop; 
+			N /= loop; N2 /= loop;
 			T /= loop; T2 /= loop;
 			V /= loop; V2 /= loop;
 			writeln("bench: depth: ", depth, "; ", cast (long) N, " +/-", sqrt(N2 - N * N), " nodes in ", T, " +/-", sqrt(T2 - T * T), " s, ", cast (int) (N / T), " nps +/-", sqrt(V2 - V * V), ".");
