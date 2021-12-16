@@ -1,7 +1,7 @@
 /*
  * File uci.d
  * Universal Chess Interface.
- * © 2016-2020 Richard Delorme
+ * © 2016-2021 Richard Delorme
  */
 
 module uci;
@@ -11,7 +11,7 @@ import std.algorithm, std.array, std.conv, std.concurrency, std.parallelism, std
 import core.thread;
 
 /* version */
-enum string versionNumber = "3.3.1";
+enum string versionNumber = "3.4";
 
 /* Some information about the compilation */
 string arch() @property {
@@ -78,7 +78,7 @@ final class Uci {
 
 	/* set Hash Size */
 	void resize(const size_t s) {
-		const size_t hashSize = clamp(s, 1, 4096 * Entry.sizeof);
+		const size_t hashSize = clamp(s, 1, 65536 * Entry.sizeof);
 		search.resize(hashSize.MBytes);
 	}
 
@@ -112,7 +112,7 @@ final class Uci {
 
 	/* set max time to use const hard (failing low) position */
 	double setExtraTime(const double maxTime) {
-		return max(maxTime, min(2.0 * maxTime, time[board.player].remaining * 0.1)); 
+		return max(maxTime, min(2.0 * maxTime, time[board.player].remaining * 0.1));
 	}
 
 	/* uci command */
@@ -120,12 +120,12 @@ final class Uci {
 		message.send("id name " ~ name);
 		message.send("id author Richard Delorme");
 		message.send("option name Ponder type check default false");
-		message.send("option name Hash type spin default ", hashSize, " min 1 max ", 4096 * Entry.sizeof);
+		message.send("option name Hash type spin default ", hashSize, " min 1 max ", 65536 * Entry.sizeof);
 		message.send("option name Clear Hash type button");
 		message.send("option name Threads type spin default ", nThreads, " min 1 max 256");
-		message.send("option name Affinity type string default ", affinity);
 		message.send("option name MultiPV type spin default 1 min 1 max 256");
 		message.send("option name UCI_AnalyseMode type check default false");
+		message.send("option name Affinity type string default ", affinity);
 		// add more options here...
 		message.send("uciok");
 	}
@@ -159,7 +159,7 @@ final class Uci {
 		else if (findSkip(line, "fen")) board.set(line);
 		if (findSkip(line, "moves")) {
 			auto words = line.split();
-			foreach(w ; words) {
+			foreach (w ; words) {
 				Move m = fromPan(w);
 				if (board.isLegal(m)) board.update(m);
 				else message.send("info error ", w, " is not a legal move");
@@ -170,7 +170,7 @@ final class Uci {
 
 	/* search only some moves */
 	void searchmoves(string [] words) {
-		foreach(w ; words) {
+		foreach (w ; words) {
 			Move m = fromPan(w);
 			if (board.isLegal(m)) moves.push(m);
 		}
@@ -189,12 +189,13 @@ final class Uci {
 		string [] words = line.split();
 
 		moves.clear();
-		option.depth.end = Limits.ply.max;
+		option.depth.max = Limits.ply.max;
 		option.nodes.max = ulong.max;
-		foreach(c ; Color.white .. Color.size) time[c].clear();
+		option.mate.max = 0; // unreachable value
+		foreach (c ; Color.white .. Color.size) time[c].clear();
 		isPondering = infiniteSearch = false;
 		// interpret the go command parameters
-		foreach(i, ref w ; words) {
+		foreach (i, ref w ; words) {
 			if (w == "searchmoves") searchmoves(words);
 			else if (w == "ponder") isPondering = true;
 			else if (w == "wtime" && i + 1 < words.length) time[Color.white].remaining = 0.001 * to!double(words[i + 1]);
@@ -202,14 +203,14 @@ final class Uci {
 			else if (w == "winc" && i + 1 < words.length) time[Color.white].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "binc" && i + 1 < words.length) time[Color.black].increment = 0.001 * to!double(words[i + 1]);
 			else if (w == "movestogo" && i + 1 < words.length) movesToGo = to!int(words[i + 1]);
-			else if (w == "depth" && i + 1 < words.length) option.depth.end = to!int(words[i + 1]);
-			else if (w == "mate" && i + 1 < words.length) option.depth.end = to!int(words[i + 1]);
+			else if (w == "depth" && i + 1 < words.length) option.depth.max = to!int(words[i + 1]);
+			else if (w == "mate" && i + 1 < words.length) option.mate.max = to!int(words[i + 1]);
 			else if (w == "nodes" && i + 1 < words.length) option.nodes.max = to!ulong(words[i + 1]);
 			else if (w == "movetime" && i + 1 < words.length) time[board.player].increment = 0.001 * to!double(words[i + 1]);
-			else if (w == "infinite") { option.depth.end =  Limits.ply.max; infiniteSearch = true; }
+			else if (w == "infinite") { option.depth.max =  Limits.ply.max; infiniteSearch = true; }
 		}
 		// option overriding from the commandline
-		if (forcedDepth >= 0) option.depth.end = forcedDepth;
+		if (forcedDepth >= 0) option.depth.max = forcedDepth;
 		if (forcedTime > 0.0) {
 			time[board.player].clear();
 			time[board.player].increment = 0.001 * forcedTime;
@@ -253,6 +254,7 @@ final class Uci {
 			// extension
 			else if (startsWith(line, "bench")) bench(line.split(), search);
 			else if (startsWith(line, "perft")) perft(line.split(), board);
+			else if (startsWith(line, "weight")) search.eval.coeff.print();
 			// unused
 			else if (findSkip(line, "register")) {}
 			// xboard
