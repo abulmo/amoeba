@@ -1,6 +1,6 @@
 /*
  * main function
- * © 2016-2020 Richard Delorme
+ * © 2016-2021 Richard Delorme
  */
 
 module amoeba;
@@ -55,7 +55,7 @@ void main(string[] args) {
 
 	try {
 		kpk.init();
-		foreach(i, arg; args) {
+		foreach (i, arg; args) {
 			if (arg == "--debug" || arg == "-g") dbg = true;
 			if (arg == "--depth" || arg == "-d") depth = to!int(args[i + 1]); // i < args.length ?
 			if (arg == "--time" || arg == "-t") time = to!double(args[i + 1]);
