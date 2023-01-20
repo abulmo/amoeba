@@ -241,15 +241,18 @@ private:
 	}
 
 	static immutable int [Piece.size] stageValue = [0, 0, 3, 3, 5, 10, 0];
-	static immutable uint [Color.size][20] drawishTable = [
+	static immutable uint [Color.size][23] drawishTable = [
 		// QRBNP-    qrbnp-
 		[0x000200, 0x000000], // 2 knights
 		[0x001100, 0x000100], // bishop + knight vs knight
 		[0x001100, 0x001000], // bishop + knight vs bishop
+		[0x001100, 0x010000], // bishop + knight vs rook
 		[0x002000, 0x000100], // 2 bishops vs knight
 		[0x002000, 0x001000], // 2 bishops vs bishop
+		[0x002000, 0x010000], // 2 bishops vs rook
 		[0x000200, 0x000100], // 2 knights vs knight
 		[0x000200, 0x001000], // 2 knights vs bishop
+		[0x000200, 0x010000], // 2 knights vs rook
 		[0x010000, 0x010000], // rook vs rook
 		[0x010000, 0x001000], // rook vs bishop
 		[0x010000, 0x000100], // rook vs knight
