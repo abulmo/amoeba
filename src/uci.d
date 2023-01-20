@@ -11,7 +11,7 @@ import std.algorithm, std.array, std.conv, std.concurrency, std.parallelism, std
 import core.thread;
 
 /* version */
-enum string versionNumber = "3.4";
+enum string versionNumber = "3.5";
 
 /* Some information about the compilation */
 string arch() @property {
