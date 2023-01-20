@@ -100,7 +100,7 @@ struct Info {
 	}
 
 	/* write the search results found so far using UCI protocol */
-	string toUCI(const int iPv, const TranspositionTable* tt, const ulong nodes) const {
+	string toUCI(const TranspositionTable* tt, const ulong nodes) const {
 		string s;
 
 		foreach (i; 0 .. multiPv) {
@@ -559,7 +559,7 @@ private:
 			multiPv(search.option.multiPv, depth);
 		}
 		stop = true;
-		if (search.message) search.message.log("smp> task[", id, "] finished: ", info.toUCI(search.option.multiPv, tt, nNodes));
+		if (search.message) search.message.log("smp> task[", id, "] finished: ", info.toUCI(tt, nNodes));
 	}
 
 	/* clear search setting before searching */
@@ -802,14 +802,14 @@ struct Search {
 	/* toUCI */
 	void toUCI() {
 		if (option.verbose) {
-			if (message) message.send(master.info.toUCI(master.iPv, tt, countNodes()));
-			else writeln(master.info.toUCI(master.iPv, tt, countNodes()));
-		} else if (message) message.log!'>'(master.info.toUCI(master.iPv, tt, countNodes()));
+			if (message) message.send(master.info.toUCI(tt, countNodes()));
+			else writeln(master.info.toUCI(tt, countNodes()));
+		} else if (message) message.log!'>'(master.info.toUCI(tt, countNodes()));
 	}
 
 	//* test the speed of the search up to depth d */
 	void bench(const int depth, const CPUAffinity affinity, const int loop) {
-		// bratko - kopeck position set
+		// Bratko - Kopeck position set
 		string [24] fens = [
 			"1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -",
 			"3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - - ",
@@ -885,8 +885,8 @@ void bench(string [] arg, ref Search search) {
 		writeln("Test the speed of the search on the bratko-kopeck test. Options");
 		writeln("    --depth|-d <depth>     Search at depth d (default: 18)");
 		writeln("    --hash|-H <Mb>         Set default HashSize");
-		writeln("    --cpu|-c <threads>     Set default number of threads\n");
-		writeln("    --loop|-l <n>          repeat the bench <n> times\n");
+		writeln("    --cpu|-c <threads>     Set default number of threads");
+		writeln("    --loop|-l <n>          Repeat the bench <n> times");
 		writeln("    --affinity|-a <[o:]s>  Set cpu affinity as 'offset:step'");
 		writeln("    --help|-h              Display this help");
 	}
